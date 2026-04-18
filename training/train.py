@@ -17,8 +17,9 @@ def main():
     parser.add_argument("--output", default="./output")
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr",     type=float, default=2e-4)
-    parser.add_argument("--lora-r", type=int, default=32)
+    parser.add_argument("--lora-r", type=int, default=64)
     parser.add_argument("--batch",  type=int, default=4)
+    parser.add_argument("--seq-len", type=int, default=4096)
     args = parser.parse_args()
 
     # ── Imports (after pip install) ───────────────────────────────────────────
@@ -33,8 +34,8 @@ def main():
     print("[train] Loading Qwen/Qwen3-1.7B with 4-bit quantization...")
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name="Qwen/Qwen3-1.7B",
-        max_seq_length=2048,
-        dtype=None,          # auto-detect: bf16 on A10G
+        max_seq_length=args.seq_len,
+        dtype=None,
         load_in_4bit=True,
     )
 
@@ -44,7 +45,7 @@ def main():
         r=args.lora_r,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
                          "gate_proj", "up_proj", "down_proj"],
-        lora_alpha=args.lora_r * 2,
+        lora_alpha=args.lora_r * 2,  # 128 with default r=64
         lora_dropout=0,
         bias="none",
         use_gradient_checkpointing="unsloth",
@@ -71,7 +72,13 @@ def main():
             )
         }
 
-    dataset = Dataset.from_list([format_example(ex) for ex in examples])
+    formatted = [format_example(ex) for ex in examples]
+    split_idx = int(len(formatted) * 0.95)
+    train_data = formatted[:split_idx]
+    eval_data = formatted[split_idx:]
+    dataset = Dataset.from_list(train_data)
+    eval_dataset = Dataset.from_list(eval_data)
+    print(f"[train] {len(train_data)} train, {len(eval_data)} eval examples")
 
     # ── Training ──────────────────────────────────────────────────────────────
     print("[train] Starting training...")
@@ -79,8 +86,9 @@ def main():
         model=model,
         tokenizer=tokenizer,
         train_dataset=dataset,
+        eval_dataset=eval_dataset,
         dataset_text_field="text",
-        max_seq_length=2048,
+        max_seq_length=args.seq_len,
         dataset_num_proc=2,
         packing=True,
         args=TrainingArguments(
@@ -92,12 +100,15 @@ def main():
             fp16=not is_bfloat16_supported(),
             bf16=is_bfloat16_supported(),
             logging_steps=10,
+            eval_strategy="epoch",
             optim="adamw_8bit",
             weight_decay=0.01,
             lr_scheduler_type="cosine",
             seed=42,
             output_dir=args.output,
             save_strategy="epoch",
+            load_best_model_at_end=True,
+            metric_for_best_model="eval_loss",
             report_to="none",
         ),
     )

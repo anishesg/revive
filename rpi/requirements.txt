@@ -1,0 +1,4 @@
+aiohttp>=3.9.0
+zeroconf>=0.131.0
+psutil>=5.9.0
+huggingface_hub>=0.20.0

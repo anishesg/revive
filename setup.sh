@@ -7,12 +7,12 @@
 
 set -e
 
-LLAMA_DIR="/Users/anish/Desktop/llama.cpp"
 REVIVE_DIR="$(cd "$(dirname "$0")" && pwd)"
+LLAMA_DIR="$REVIVE_DIR/../llama.cpp"
 
-echo "=== REVIVE Setup ==="
-echo "llama.cpp: $LLAMA_DIR"
+echo "=== REVIVE iOS Setup ==="
 echo "project:   $REVIVE_DIR"
+echo "llama.cpp: $LLAMA_DIR"
 echo ""
 
 # ── 1. Check prerequisites ────────────────────────────────────────────────────
@@ -28,18 +28,24 @@ for tool in cmake xcodegen xcodebuild; do
 done
 echo "✓ Prerequisites satisfied"
 
-# ── 2. Build llama.xcframework ────────────────────────────────────────────────
+# ── 2. Clone llama.cpp if needed ──────────────────────────────────────────────
+if [ ! -d "$LLAMA_DIR" ]; then
+  echo "Cloning llama.cpp..."
+  git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR"
+fi
+
+# ── 3. Build llama.xcframework ────────────────────────────────────────────────
 XCFW="$LLAMA_DIR/build-apple/llama.xcframework"
 if [ -d "$XCFW" ]; then
   echo "✓ llama.xcframework already built"
 else
-  echo "⚙  Building llama.xcframework (15-20 min)..."
+  echo "Building llama.xcframework (15-20 min)..."
   cd "$LLAMA_DIR"
   bash build-xcframework.sh
   echo "✓ llama.xcframework built"
 fi
 
-# ── 3. Generate Xcode project ─────────────────────────────────────────────────
+# ── 4. Generate Xcode project ─────────────────────────────────────────────────
 cd "$REVIVE_DIR"
 xcodegen generate
 echo "✓ revive.xcodeproj generated"

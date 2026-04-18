@@ -50,7 +50,6 @@ targets:
       - SDK: Foundation.framework
       - SDK: Metal.framework
       - SDK: Accelerate.framework
-      # llama.xcframework must be built first: cd /Users/anish/Desktop/llama.cpp && bash build-xcframework.sh
       - path: ../llama.cpp/build-apple/llama.xcframework
         embed: true
         codeSign: true
