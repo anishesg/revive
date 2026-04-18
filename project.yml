@@ -1,0 +1,64 @@
+name: revive
+options:
+  bundleIdPrefix: com.revive
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    ENABLE_BITCODE: NO
+    DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+
+targets:
+  revive:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    info:
+      path: revive/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSLocalNetworkUsageDescription: "REVIVE uses the local network to discover and communicate with worker phones in the swarm."
+        NSBonjourServices:
+          - "_revive._tcp"
+        UIBackgroundModes:
+          - audio
+          - fetch
+        CFBundleDisplayName: "REVIVE"
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+    entitlements:
+      path: revive/revive.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    sources:
+      - path: revive
+        excludes:
+          - "**/*.md"
+    resources:
+      - path: revive/Coordinator/WebDashboard
+        buildPhase: resources
+    frameworks:
+      - SDK: Network.framework
+      - SDK: Foundation.framework
+      - SDK: Metal.framework
+      - SDK: Accelerate.framework
+      # llama.xcframework must be built first: cd /Users/anish/Desktop/llama.cpp && bash build-xcframework.sh
+      - path: ../llama.cpp/build-apple/llama.xcframework
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.revive.app
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"  # iPhone + iPad
+        INFOPLIST_FILE: revive/Info.plist
+        OTHER_LDFLAGS: "-lc++"

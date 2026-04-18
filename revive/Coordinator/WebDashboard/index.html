@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>REVIVE — Phone Swarm AI</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">R E V I V E</div>
+    <div class="tagline">Phone Swarm Collective Intelligence</div>
+    <div class="mode-toggle">
+      <button id="btn-swarm" class="active" onclick="setMode('swarm')">⚡ Swarm</button>
+      <button id="btn-speed" onclick="setMode('speed')">🚀 Speed</button>
+    </div>
+  </header>
+
+  <!-- Swarm graph -->
+  <section id="swarm-section">
+    <canvas id="swarm-canvas"></canvas>
+    <div id="swarm-stats">
+      <span id="stat-nodes">0 nodes</span>
+      <span id="stat-tps">0 tok/s</span>
+      <span id="stat-queries">0 queries</span>
+    </div>
+  </section>
+
+  <!-- Agent cards -->
+  <section id="agents-section">
+    <div id="agents-grid"></div>
+  </section>
+
+  <!-- Chat -->
+  <section id="chat-section">
+    <div id="chat-log"></div>
+    <div id="chat-input-row">
+      <input id="chat-input" type="text" placeholder="Ask the swarm anything..."
+             onkeydown="if(event.key==='Enter') sendQuery()">
+      <button onclick="sendQuery()">Send</button>
+    </div>
+  </section>
+
+  <!-- Single vs Swarm comparison -->
+  <section id="compare-section" style="display:none">
+    <h3>Single Phone vs. Swarm</h3>
+    <div class="compare-grid">
+      <div class="compare-col">
+        <div class="compare-label">Single (1 phone)</div>
+        <div id="single-answer" class="answer-box"></div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-label">Swarm (all phones)</div>
+        <div id="swarm-answer" class="answer-box"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Impact panel -->
+  <section id="impact-section">
+    <h3>Global Impact</h3>
+    <div class="impact-grid">
+      <div class="impact-stat">
+        <div class="impact-num" id="impact-power">--W</div>
+        <div class="impact-label">Cluster Power</div>
+      </div>
+      <div class="impact-stat">
+        <div class="impact-num red">300W</div>
+        <div class="impact-label">A100 GPU</div>
+      </div>
+      <div class="impact-stat">
+        <div class="impact-num green" id="impact-saving">--%</div>
+        <div class="impact-label">Power Saved</div>
+      </div>
+    </div>
+    <div class="impact-calc">
+      <label>If <span id="pct-val">5</span>% of 5.3B phones joined this swarm:</label>
+      <input type="range" min="1" max="20" value="5" id="impact-slider" oninput="updateImpact(this.value)">
+      <div id="impact-result">265M nodes · 53M GPUs displaced · 15.9 GW saved</div>
+    </div>
+  </section>
+
+</div>
+<script src="/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Build artifacts
+build/
+build-apple/
+
+# GGUF model files (too large for git)
+*.gguf
+models/
+
+# Python
+__pycache__/
+*.py[cod]
+.env
+venv/
+.venv/
+*.egg-info/
+
+# Training outputs
+training/output/
+training/data.jsonl
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
