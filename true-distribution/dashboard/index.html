@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>REVIVE Cluster</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#050505;color:#d8d8d8;font-family:'SF Mono','Fira Code',monospace;font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* header */
+#hdr{display:flex;align-items:center;gap:24px;padding:10px 18px;border-bottom:1px solid #141414;flex-shrink:0;background:#070707}
+#hdr h1{font-size:16px;font-weight:900;color:#00ff88;letter-spacing:4px}
+.hsep{width:1px;height:24px;background:#1a1a1a}
+.stat{display:flex;flex-direction:column;align-items:flex-start;min-width:60px}
+.stat-l{font-size:8px;color:#3a3a3a;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:2px}
+.stat-v{font-size:14px;font-weight:700;color:#e8e8e8;line-height:1}
+#state-pill{padding:3px 9px;border-radius:10px;font-size:10px;font-weight:800;letter-spacing:1px;margin-left:auto}
+.state-healthy{background:#002f18;color:#00ff88;border:1px solid #00ff8833}
+.state-degraded{background:#3a2a00;color:#ffaa00;border:1px solid #ffaa0033}
+.state-down{background:#3a0000;color:#ff3f3f;border:1px solid #ff3f3f33}
+.state-disconnected{background:#222;color:#555;border:1px solid #333}
+
+/* body */
+#body{display:flex;flex:1;overflow:hidden}
+
+/* LEFT: cluster column */
+#side{width:280px;border-right:1px solid #141414;display:flex;flex-direction:column;overflow:hidden;background:#060606}
+.sect{padding:12px 14px;border-bottom:1px solid #101010}
+.sect-h{font-size:9px;color:#333;letter-spacing:2px;margin-bottom:10px}
+
+/* cluster topology viz */
+#topology{display:flex;flex-direction:column;gap:7px}
+.wcard{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:8px;padding:10px;transition:all .25s}
+.wcard.dead{opacity:.35;border-color:#ff3f3f44}
+.wcard.has-layers{border-color:#00ff8833}
+.wcard .row1{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.wdot{width:7px;height:7px;border-radius:50%;background:#2a2a2a;flex-shrink:0}
+.wcard.has-layers .wdot{background:#00ff88;box-shadow:0 0 6px #00ff8877}
+.wcard.dead .wdot{background:#ff3f3f}
+.wid{font-size:11px;font-weight:700;letter-spacing:0.5px}
+.wurl{font-size:9px;color:#3a3a3a;margin-left:auto}
+.wrange{font-size:10px;color:#888;margin-top:2px}
+.wlayerbar{height:5px;background:#111;border-radius:3px;margin-top:6px;position:relative;overflow:hidden}
+.wlayerbar-inner{position:absolute;top:0;bottom:0;background:#00ff88;border-radius:3px;transition:all .4s}
+.wcard.dead .wlayerbar-inner{background:#ff3f3f}
+.wfail{margin-top:8px;display:flex;gap:4px}
+.wfail button{flex:1;background:transparent;border:1px solid #202020;color:#666;padding:3px 0;border-radius:4px;font-family:inherit;font-size:9px;cursor:pointer;letter-spacing:1px}
+.wfail button:hover{border-color:#ff3f3f66;color:#ff6666}
+.wfail button.heal{color:#666}
+.wfail button.heal:hover{border-color:#00ff8866;color:#00ff88}
+
+/* layer strip — all N layers laid out horizontally, colored by owning worker */
+#layerstrip{display:flex;width:100%;height:28px;border-radius:5px;overflow:hidden;border:1px solid #1a1a1a;margin-top:4px}
+.layercell{flex:1;position:relative}
+.layercell:not(:last-child){border-right:1px solid #0a0a0a}
+.layercell.unowned{background:#151515}
+
+/* BMC event log */
+#bmclog{max-height:190px;overflow-y:auto;font-size:10px;line-height:1.5}
+#bmclog::-webkit-scrollbar{width:3px}
+#bmclog::-webkit-scrollbar-thumb{background:#222}
+.evt{padding:2px 0;display:flex;gap:6px}
+.evt .arrow{color:#444;flex-shrink:0}
+.evt .arrow.to-bmc{color:#4A90D9}
+.evt .arrow.from-bmc{color:#00ff88}
+.evt .line{color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.evt .line.ack{color:#444}
+.evt .line.dead,.evt .line.fail{color:#ff6666}
+.evt .line.alive{color:#00ff88}
+.evt .line.partition{color:#ffaa00}
+
+/* RIGHT: chat */
+#chat{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#msgs{flex:1;overflow-y:auto;padding:24px 28px}
+#msgs::-webkit-scrollbar{width:4px}
+#msgs::-webkit-scrollbar-thumb{background:#181818}
+.qblock{margin-bottom:28px}
+.user-msg{display:flex;justify-content:flex-end;margin-bottom:10px}
+.user-bubble{background:#0a1622;border:1px solid #1a3252;border-radius:12px 12px 2px 12px;padding:10px 14px;max-width:70%;color:#d0d0d0;line-height:1.5}
+.asst{background:#0a0a0a;border:1px solid #181818;border-radius:10px;padding:14px 16px;color:#bbb;line-height:1.65;white-space:pre-wrap;word-break:break-word;position:relative}
+.asst.aborted{border-color:#ff3f3f55;background:#160505}
+.asst-meta{font-size:9px;color:#3a3a3a;letter-spacing:1px;margin-bottom:8px;text-transform:uppercase}
+.asst-meta .tok{color:#00ff88}
+.asst-abort{margin-top:10px;padding:8px 10px;background:#1a0606;border:1px solid #ff3f3f33;border-radius:6px;color:#ff9090;font-size:11px}
+
+#empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;pointer-events:none}
+#empty .icon{font-size:44px;opacity:.1}
+#empty .txt{font-size:11px;color:#252525;letter-spacing:2px}
+
+/* input bar */
+#ibar{display:flex;gap:8px;padding:14px 18px;border-top:1px solid #141414;flex-shrink:0;background:#060606}
+#qin{flex:1;background:#0a0a0a;border:1px solid #222;border-radius:8px;color:#fff;padding:10px 14px;font-family:inherit;font-size:13px;outline:none;transition:border-color .2s;height:42px}
+#qin:focus{border-color:#00ff8855}
+#qin::placeholder{color:#222}
+#sbtn{background:#00ff88;border:none;border-radius:8px;color:#000;padding:10px 22px;font-family:inherit;font-weight:800;cursor:pointer;transition:opacity .2s;letter-spacing:.5px;height:42px}
+#sbtn:disabled{opacity:.2;cursor:default}
+#sbtn:hover:not(:disabled){opacity:.85}
+
+/* connection dot */
+#conn{width:8px;height:8px;border-radius:50%;background:#1e1e1e;transition:background .3s}
+#conn.live{background:#00ff88;box-shadow:0 0 6px #00ff8866}
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <h1>REVIVE</h1>
+  <div class="hsep"></div>
+  <div class="stat"><span class="stat-l">MODEL</span><span class="stat-v" id="model">—</span></div>
+  <div class="stat"><span class="stat-l">LAYERS</span><span class="stat-v" id="layers">0</span></div>
+  <div class="stat"><span class="stat-l">WORKERS</span><span class="stat-v" id="workers-count">0</span></div>
+  <div class="stat"><span class="stat-l">TOKENS</span><span class="stat-v" id="total-tokens">0</span></div>
+  <div class="stat"><span class="stat-l">TOK/S</span><span class="stat-v" id="tps">0.0</span></div>
+  <div id="state-pill" class="state-disconnected">DISCONNECTED</div>
+  <div id="conn"></div>
+</div>
+
+<div id="body">
+  <div id="side">
+    <div class="sect">
+      <div class="sect-h">CLUSTER TOPOLOGY</div>
+      <div id="layerstrip"></div>
+      <div id="topology" style="margin-top:12px"></div>
+    </div>
+    <div class="sect" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+      <div class="sect-h">BMC EVENT LOG</div>
+      <div id="bmclog"></div>
+    </div>
+  </div>
+
+  <div id="chat">
+    <div id="msgs">
+      <div id="empty">
+        <div class="icon">⚡</div>
+        <div class="txt">ASK THE CLUSTER ANYTHING</div>
+      </div>
+    </div>
+    <div id="ibar">
+      <input id="qin" placeholder="Ask the cluster…"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();send()}"/>
+      <button id="sbtn" onclick="send()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const WORKER_COLORS = ['#00ff88','#4A90D9','#F5A623','#9B59B6','#E74C3C','#2ECC71'];
+let state = null;
+let renderedQids = new Set();
+
+function connect() {
+  const es = new EventSource('/events');
+  const conn = document.getElementById('conn');
+  es.onopen = () => { conn.className = 'live'; renderedQids = new Set(); };
+  es.onerror = () => { conn.className = ''; setTimeout(connect, 2000); };
+  es.onmessage = e => { state = JSON.parse(e.data); render(); };
+}
+connect();
+
+function workerColor(wid, workers) {
+  const idx = workers.findIndex(w => w.id === wid);
+  return WORKER_COLORS[idx % WORKER_COLORS.length] || '#00ff88';
+}
+
+function render() {
+  if (!state) return;
+
+  // Header
+  document.getElementById('model').textContent = (state.model || '—').split('/').pop();
+  document.getElementById('layers').textContent = state.num_layers || 0;
+  document.getElementById('workers-count').textContent = state.workers.length;
+  document.getElementById('total-tokens').textContent = fmt(state.total_tokens);
+  document.getElementById('tps').textContent = state.collective_tps.toFixed(1);
+
+  // BMC state pill
+  const pill = document.getElementById('state-pill');
+  pill.textContent = (state.bmc.state || 'disconnected').toUpperCase();
+  pill.className = 'state-' + (state.bmc.state || 'disconnected');
+
+  // Layer strip — colored bars showing which worker owns each layer
+  const strip = document.getElementById('layerstrip');
+  const L = state.num_layers || 0;
+  const partition = state.bmc.partition;
+  if (L > 0) {
+    let html = '';
+    for (let i = 0; i < L; i++) {
+      const owner = partition.find(p => i >= p[1] && i < p[2]);
+      if (owner) {
+        const color = workerColor(owner[0], state.workers);
+        html += `<div class="layercell" style="background:${color}aa" title="layer ${i}: ${owner[0]}"></div>`;
+      } else {
+        html += `<div class="layercell unowned" title="layer ${i}: unassigned"></div>`;
+      }
+    }
+    strip.innerHTML = html;
+  }
+
+  // Worker cards + chaos buttons
+  const topo = document.getElementById('topology');
+  topo.innerHTML = state.workers.map(w => {
+    const color = workerColor(w.id, state.workers);
+    const owned = partition.find(p => p[0] === w.id);
+    const span = owned ? (owned[2] - owned[1]) : 0;
+    const pct = L > 0 ? (span / L * 100) : 0;
+    const classes = ['wcard'];
+    if (w.dead) classes.push('dead');
+    if (span > 0) classes.push('has-layers');
+    return `<div class="${classes.join(' ')}">
+      <div class="row1">
+        <span class="wdot"></span>
+        <span class="wid" style="color:${color}">${esc(w.id.toUpperCase())}</span>
+        <span class="wurl">${esc(w.host)}:${w.port}</span>
+      </div>
+      <div class="wrange">
+        ${owned ? `layers [${owned[1]}..${owned[2]}) · ${span} of ${L}` : (w.dead ? '<span style="color:#ff6666">DEAD — no assignment</span>' : 'unassigned')}
+      </div>
+      <div class="wlayerbar"><div class="wlayerbar-inner" style="width:${pct}%;background:${color}"></div></div>
+      <div class="wfail">
+        <button onclick="chaos('fail','${w.id}')">KILL</button>
+        <button class="heal" onclick="chaos('heal','${w.id}')">HEAL</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // BMC event log
+  const evtDiv = document.getElementById('bmclog');
+  evtDiv.innerHTML = state.bmc_events.slice(-40).map(evt => {
+    const isToBmc = evt.dir === '→';
+    const arrowClass = isToBmc ? 'to-bmc' : 'from-bmc';
+    const line = evt.line;
+    const lineClass = (line.startsWith('ACK ') ? 'ack' :
+                       line.startsWith('DEAD') ? 'dead' :
+                       line.startsWith('FAIL') ? 'fail' :
+                       line.startsWith('ALIVE') ? 'alive' :
+                       line.startsWith('PARTITION') ? 'partition' : '');
+    return `<div class="evt"><span class="arrow ${arrowClass}">${evt.dir}</span><span class="line ${lineClass}">${esc(line)}</span></div>`;
+  }).join('');
+  evtDiv.scrollTop = evtDiv.scrollHeight;
+
+  // Messages
+  const msgsDiv = document.getElementById('msgs');
+  const empty = document.getElementById('empty');
+  if (!state.messages.length) {
+    empty.style.display = 'flex';
+  } else {
+    empty.style.display = 'none';
+    // group messages by qid (user + assistant for each turn)
+    const turns = {};
+    for (const m of state.messages) {
+      if (!turns[m.qid]) turns[m.qid] = { user: null, asst: null, ts: m.ts };
+      if (m.role === 'user') turns[m.qid].user = m;
+      else turns[m.qid].asst = m;
+    }
+    const qids = Object.keys(turns);
+    let html = '';
+    for (const qid of qids) {
+      const t = turns[qid];
+      let block = `<div class="qblock">`;
+      if (t.user) {
+        block += `<div class="user-msg"><div class="user-bubble">${esc(t.user.content)}</div></div>`;
+      }
+      if (t.asst) {
+        const classes = ['asst'];
+        if (t.asst.aborted) classes.push('aborted');
+        const meta = [];
+        if (t.asst.tokens > 0) meta.push(`<span class="tok">${t.asst.tokens} tok</span>`);
+        if (t.asst.tps > 0) meta.push(`${t.asst.tps.toFixed(1)} tok/s`);
+        block += `<div class="${classes.join(' ')}">`;
+        if (meta.length) block += `<div class="asst-meta">${meta.join(' · ')}</div>`;
+        block += esc(t.asst.content || (state.busy ? '…' : ''));
+        if (t.asst.aborted) {
+          block += `<div class="asst-abort">⚠ ${esc(t.asst.abort_reason)}</div>`;
+        }
+        block += `</div>`;
+      }
+      block += `</div>`;
+      html += block;
+    }
+    msgsDiv.innerHTML = html;
+    msgsDiv.scrollTop = msgsDiv.scrollHeight;
+  }
+
+  // Disable Send while busy
+  document.getElementById('sbtn').disabled = state.busy;
+}
+
+async function send() {
+  const inp = document.getElementById('qin');
+  const q = inp.value.trim();
+  if (!q) return;
+  inp.value = '';
+  try {
+    await fetch('/query', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({prompt: q}) });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function chaos(action, workerId) {
+  try {
+    await fetch('/chaos/' + action, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({worker_id: workerId}) });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function fmt(n) { return n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n); }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+</body>
+</html>
