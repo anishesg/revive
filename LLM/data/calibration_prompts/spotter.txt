@@ -1,0 +1,40 @@
+What causes the seasons on Earth?
+Should we colonize Mars? Why or why not?
+How does a neural network learn?
+Write a haiku about debugging code.
+What is the time complexity of quicksort?
+Is free will compatible with determinism?
+Explain quantum computing to a five-year-old.
+What are the pros and cons of microservices?
+How does inflation affect the average person?
+What is the most important invention of the 21st century?
+Explain the difference between TCP and UDP.
+Should social media have age restrictions?
+How do vaccines work at the molecular level?
+What makes a great leader?
+Explain the Fermi paradox.
+What is the future of renewable energy?
+How does a compiler optimize code?
+Is math discovered or invented?
+What are the risks of artificial general intelligence?
+How does the immune system fight cancer?
+What is the P vs NP problem?
+Should AI-generated art be copyrightable?
+How does HTTPS protect web traffic?
+What causes economic recessions?
+Is the universe infinite?
+How do you design a system for 1 billion users?
+What is the Ship of Theseus paradox?
+Explain MapReduce in simple terms.
+What would happen if the Earth stopped rotating?
+How does a hash table handle collisions?
+Is meritocracy achievable?
+What is the most efficient sorting algorithm?
+How do black holes form?
+Should programming be taught in elementary school?
+What is emergent behavior in complex systems?
+How does mRNA differ from DNA?
+What are the ethical limits of genetic engineering?
+Explain the CAP theorem to a non-engineer.
+What would a four-day work week change?
+How does blockchain consensus work?

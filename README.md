@@ -25,6 +25,9 @@ Built at HackPrinceton 2025.
 - [Web Dashboard](#web-dashboard)
 - [API Reference](#api-reference)
 - [Training & Fine-tuning](#training--fine-tuning)
+  - [LLM Pipeline (recommended)](#llm-pipeline-recommended)
+  - [Training on AWS](#training-on-aws)
+  - [Legacy Pipeline](#legacy-pipeline)
 - [Protocol Specification](#protocol-specification)
 - [Project Structure](#project-structure)
 - [Performance](#performance)
@@ -114,26 +117,41 @@ All four platforms speak the same protocol, discover each other via mDNS, and ex
 
 ## Models
 
-REVIVE uses the **Qwen3** model family in GGUF format, quantized to Q4_K_M. Qwen3 was chosen because:
+REVIVE uses the **Qwen3** model family, fine-tuned per role and quantized to GGUF. Qwen3 was chosen because:
 
 - The 1.7B model matches previous-generation 3B quality
-- Dual thinking/non-thinking mode maps naturally to role specialization (fast classification vs. deep reasoning)
+- Dual thinking/non-thinking mode maps naturally to role specialization
 - GQA (grouped-query attention) halves KV cache memory — critical on phones
 - Native ChatML format matches our prompt structure
 
-### Recommended Models by Device
+### Device Tiers
 
-| Device | RAM | Model | Quant | Size | Role |
-|--------|-----|-------|-------|------|------|
-| iPhone 15 Pro | 8GB | Qwen3-1.7B | Q4_K_M | ~1.1GB | Any role |
-| iPhone 13/14 | 4-6GB | Qwen3-0.6B | Q4_K_M | ~0.4GB | Spotter, Drafter |
-| Android (6GB+) | 6GB+ | Qwen3-1.7B | Q4_K_M | ~1.1GB | Any role |
-| Android (4GB) | 4GB | Qwen3-0.6B | Q4_K_M | ~0.4GB | Spotter, Drafter |
-| Raspberry Pi 5 (8GB) | 8GB | Qwen3-1.7B | Q4_K_M | ~1.1GB | Aggregator |
-| Raspberry Pi 4 (4GB) | 4GB | Qwen3-0.6B | Q4_K_M | ~0.4GB | Aggregator |
-| MacBook (M-series) | 8GB+ | Qwen3-4B | Q4_K_M | ~2.5GB | Any role |
+The `LLM/` pipeline produces role-specialized models at four compression levels matched to device RAM:
 
-Models are loaded from the device's local storage. There is no cloud dependency.
+| Tier | RAM | Quant | Pruning | Example devices |
+|------|-----|-------|---------|----------------|
+| `ewaste` | 1–3 GB | Q2_K | Aggressive (−40% layers) | iPhone 6s/7, Pi 3, 3GB Android |
+| `budget` | 3–4 GB | Q3_K_S | Moderate (−25% layers) | iPhone 8/X, Pi 4 4GB, 4GB Android |
+| `standard` | 4–6 GB | Q4_K_M | None | iPhone 12/13/14, Pi 5 8GB, 6GB Android |
+| `modern` | 6 GB+ | Q5_K_M | None | iPhone 15 Pro, Pixel 8, MacBook M-series |
+
+Pruning only applies to simple roles (Spotter: −40%, Drafter/Concise: −25%). Reasoning-heavy roles (Reasoner, Critic, Factchecker, Aggregator) are never pruned.
+
+### Model Filename Convention
+
+```
+revive-{role}-qwen3-{size}-{tier}-{quant}.gguf
+
+Examples:
+  revive-reasoner-qwen3-1.7b-modern-Q5_K_M.gguf    ← iPhone 15 Pro
+  revive-writer-qwen3-1.7b-standard-Q4_K_M.gguf    ← iPhone 13/14
+  revive-spotter-qwen3-0.6b-budget-Q3_K_S.gguf     ← Pi 4 4GB
+  revive-drafter-qwen3-0.6b-ewaste-Q2_K.gguf       ← iPhone 7
+```
+
+A `manifest.json` is emitted alongside all GGUFs listing role, tier, quant, size in bytes, and SHA-256 for every file.
+
+Models are loaded from local device storage. There is no cloud dependency at inference time.
 
 ---
 
@@ -534,69 +552,110 @@ Switch between swarm and speed mode:
 
 ## Training & Fine-tuning
 
-REVIVE includes a complete fine-tuning pipeline to produce specialized models for each agent role and the aggregator.
+REVIVE includes a complete fine-tuning pipeline that produces role-specialized, device-tiered GGUF models from Qwen3 base weights.
 
-### Pipeline Overview
+### LLM Pipeline (recommended)
+
+The `LLM/` directory is the current pipeline. It produces a full tier matrix — up to 32 GGUFs covering every role × device tier combination.
 
 ```
-1. Generate synthetic data    →  Claude API (Haiku, ~$8 for 2000 examples)
-2. QLoRA fine-tune on Qwen3  →  EC2 g5.xlarge (A10G) or local GPU
-3. Export to GGUF (Q4_K_M)   →  Ready for on-device deployment
+Data generation
+  ├── Claude Haiku  → 750 examples/role  (diverse queries, ~$2 total)
+  └── Qwen3-4B teacher (local) → 750 examples/role (higher-signal distillation)
+       ↓ merge_datasets.py → ~1500 examples/role
+       ↓
+QLoRA fine-tune (Unsloth, r=32, 3 epochs, A10G ~30min/role)
+       ↓ merged 16-bit HF checkpoint
+       ↓
+Role-aware pruning (ShortGPT block importance)
+  Spotter:         −40% layers
+  Drafter/Concise: −25% layers
+  Reasoner/Writer/Critic/Factchecker/Aggregator: no pruning
+       ↓
+imatrix-calibrated quantization per device tier
+  ewaste  → Q2_K   │  budget   → Q3_K_S
+  standard→ Q4_K_M │  modern   → Q5_K_M
+       ↓
+LLM/output/gguf/revive-{role}-qwen3-{size}-{tier}-{quant}.gguf
++ manifest.json
 ```
 
-### Aggregator Training
-
-The aggregator model learns to synthesize multi-agent responses. Training data includes device metrics context so the model understands that responses from faster devices may be more thorough.
+**Quick start:**
 
 ```bash
-# Generate 2000 aggregation training examples
-ANTHROPIC_API_KEY=sk-... python3 training/generate_dataset.py --n 2000
+cd LLM
+pip install -r requirements.txt
 
-# Train aggregator (QLoRA on Qwen3-1.7B, LoRA rank 64)
-python3 training/train.py --data data.jsonl --output ./output --lora-r 64 --seq-len 4096
+# Minimum viable ship: standard tier only (~6 hrs on g5.xlarge)
+ANTHROPIC_API_KEY=sk-... bash scripts/bootstrap.sh
 
-# Output: output/revive-aggregator-1.7b-Q4_K_M.gguf
+# Full tier matrix: all 32 GGUFs
+bash scripts/compress_all.sh
+
+# Validate all roles hit their quality bar
+python3 -m LLM.eval.eval_role --all
 ```
 
-Training data format includes device context:
-```
-[Reasoner — iPhone 15 Pro @ 30 tok/s]: Step-by-step analysis...
-[Writer — Pixel 7 @ 12 tok/s]: Clear explanation...
-[Critic — Raspberry Pi @ 5 tok/s]: However, this overlooks...
-```
+**Training configuration:**
 
-The model learns to weight responses by quality (not just combine them) and to catch and correct factually wrong answers from individual agents.
-
-### Role-Specific Training
-
-Each agent role can be fine-tuned to better embody its persona:
-
-```bash
-# Generate role-specific training data
-ANTHROPIC_API_KEY=sk-... python3 training/generate_role_dataset.py --role all --n 300
-
-# Train individual roles
-python3 training/train_role.py --role reasoner --data data-reasoner.jsonl
-python3 training/train_role.py --role spotter  --data data-spotter.jsonl --base-model Qwen/Qwen3-0.6B
-
-# Or train everything at once
-bash training/train_all.sh
-```
-
-### Training Configuration
-
-| Parameter | Aggregator | Large Roles | Small Roles |
-|-----------|-----------|-------------|-------------|
+| | Aggregator | Large roles | Small roles |
+|--|-----------|-------------|-------------|
 | Base model | Qwen3-1.7B | Qwen3-1.7B | Qwen3-0.6B |
-| LoRA rank | 64 | 32 | 32 |
-| LoRA alpha | 128 | 64 | 64 |
+| LoRA rank | 32 | 32 | 32 |
 | Sequence length | 4096 | 2048 | 1024 |
 | Epochs | 3 | 3 | 3 |
 | Learning rate | 2e-4 | 2e-4 | 2e-4 |
-| Quantization | 4-bit (QLoRA) | 4-bit (QLoRA) | 4-bit (QLoRA) |
-| Export | Q4_K_M GGUF | Q4_K_M GGUF | Q4_K_M GGUF |
 
-Training uses [Unsloth](https://github.com/unslothai/unsloth) for 2x faster QLoRA and [TRL](https://github.com/huggingface/trl) SFTTrainer. Estimated time: ~30 minutes per role on an A10G GPU.
+---
+
+### Training on AWS
+
+The recommended way to run training is on an EC2 g5.xlarge (A10G 24GB, ~$0.30/hr spot). Three scripts handle the full lifecycle:
+
+**Prerequisites:** AWS CLI configured (`aws configure`), an AWS account with EC2 + S3 + IAM permissions.
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+export S3_BUCKET=my-revive-models    # will be created if it doesn't exist
+export AWS_REGION=us-east-1          # optional, defaults to us-east-1
+
+# Preview config without launching
+bash LLM/scripts/aws_launch.sh --dry-run
+
+# Launch spot instance (~$1.50–6 total, ~6 hrs)
+bash LLM/scripts/aws_launch.sh
+```
+
+The instance:
+1. Installs all dependencies (Unsloth, llama.cpp with CUDA, Python packages)
+2. Downloads the Qwen3-4B teacher GGUF from HuggingFace
+3. Runs `bootstrap.sh` (data generation → training → standard tier export)
+4. Uploads all GGUFs + `manifest.json` to `s3://{bucket}/revive-models/`
+5. Self-terminates when done
+
+```bash
+# When training completes (~6 hrs), pull models locally
+S3_BUCKET=my-revive-models bash LLM/scripts/aws_pull.sh
+# → syncs to LLM/output/gguf/
+```
+
+Monitor progress:
+```bash
+aws ec2 get-console-output --instance-id <id> --region us-east-1
+```
+
+**Estimated cost:** $1.50–6 on spot (g5.xlarge ~$0.30/hr). On-demand fallback: ~$6 if spot capacity is unavailable.
+
+---
+
+### Legacy Pipeline
+
+`training/` is the original single-tier pipeline (300 examples/role, Q4_K_M only). It stays as a reference and fallback. The `LLM/` pipeline imports its prompt banks without modifying it.
+
+```bash
+# Generate data + train all roles (single Q4_K_M tier)
+ANTHROPIC_API_KEY=sk-... bash training/train_all.sh
+```
 
 ---
 
@@ -638,6 +697,50 @@ All REVIVE nodes advertise as `_revive._tcp` with these TXT record fields:
 
 ```
 revive/
+├── LLM/                             # Model build pipeline (offline, GPU workstation)
+│   ├── train/
+│   │   ├── train_qwen_role.py       # QLoRA fine-tune per role (Unsloth)
+│   │   └── train_all.sh             # Train all 8 roles sequentially
+│   ├── data/
+│   │   ├── generate_expanded_dataset.py  # 750 examples/role via Claude Haiku
+│   │   ├── distill_from_qwen4b.py        # 750 examples/role via local teacher
+│   │   ├── merge_datasets.py             # Dedup + merge → ~1500/role
+│   │   ├── build_calibration.py          # Seed imatrix calibration prompts
+│   │   └── calibration_prompts/          # Per-role calibration text files
+│   ├── prune/
+│   │   ├── layer_prune.py           # ShortGPT block importance pruning
+│   │   ├── heal_lora.py             # Optional LoRA heal after pruning
+│   │   └── prune_profiles.yaml      # Per-role drop fractions
+│   ├── quantize/
+│   │   ├── imatrix_gen.py           # Role-specific importance matrix
+│   │   └── quantize_tiers.py        # Q2_K/Q3_K_S/Q4_K_M/Q5_K_M export
+│   ├── export/
+│   │   ├── export_tier_matrix.py    # Orchestrates full role × tier matrix
+│   │   ├── export_single.sh         # Single role/tier export
+│   │   └── manifest.py              # manifest.json writer
+│   ├── eval/
+│   │   ├── eval_role.py             # Per-role quality metrics vs teacher
+│   │   └── eval_tier.py             # Sweep quant/prune variants for a role
+│   ├── common/
+│   │   ├── role_registry.py         # Role → base model + seq_len mapping
+│   │   ├── device_tiers.yaml        # Tier → quant + prune + RAM envelope
+│   │   └── gguf_io.py               # llama.cpp subprocess helpers
+│   ├── scripts/
+│   │   ├── bootstrap.sh             # End-to-end: data → train → standard tier
+│   │   ├── compress_all.sh          # Full tier matrix export
+│   │   ├── quick_test.sh            # Smoke test binaries + spotter export
+│   │   ├── aws_launch.sh            # Launch EC2 spot instance for training
+│   │   ├── aws_user_data.sh         # EC2 boot script (installs, trains, uploads)
+│   │   └── aws_pull.sh              # Sync S3 artifacts → local gguf/
+│   └── requirements.txt
+│
+├── training/                        # Legacy single-tier pipeline (reference)
+│   ├── generate_dataset.py          # Aggregator training data (Claude Haiku)
+│   ├── generate_role_dataset.py     # Per-role training data
+│   ├── train.py                     # QLoRA aggregator training
+│   ├── train_role.py                # QLoRA per-role training
+│   └── train_all.sh                 # Full legacy pipeline
+│
 ├── revive/                          # iOS app (Swift/SwiftUI)
 │   ├── reviveApp.swift              # Entry point, mode selection
 │   ├── Info.plist                   # Bonjour permissions, background modes
@@ -696,13 +799,7 @@ revive/
 │   ├── revive-cli.py                # Worker or coordinator mode, Metal GPU
 │   └── setup.sh                     # Build llama.cpp, download model
 │
-├── training/                        # Fine-tuning pipeline
-│   ├── generate_dataset.py          # Synthetic aggregation data via Claude API
-│   ├── generate_role_dataset.py     # Per-role fine-tuning data
-│   ├── train.py                     # QLoRA fine-tune aggregator (Unsloth)
-│   ├── train_role.py                # QLoRA fine-tune individual roles
-│   └── train_all.sh                 # Master script: generate + train all
-│
+├── ARCHITECTURE.md                  # System design: two-module architecture, contracts
 ├── PROTOCOL.md                      # Cross-platform protocol specification
 ├── project.yml                      # XcodeGen project config
 └── setup.sh                         # iOS one-time setup (build xcframework)
