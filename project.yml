@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: com.revive
   deploymentTarget:
     iOS: "16.0"
-  xcodeVersion: "15"
+  xcodeVersion: "16"
   createIntermediateGroups: true
 
 settings:
@@ -45,19 +45,32 @@ targets:
     resources:
       - path: revive/Coordinator/WebDashboard
         buildPhase: resources
+      - path: revive/Resources/Qwen3-0.6B-Q4_K_M.gguf
+        buildPhase: resources
     frameworks:
       - SDK: Network.framework
       - SDK: Foundation.framework
       - SDK: Metal.framework
       - SDK: Accelerate.framework
-      - path: ../llama.cpp/build-apple/llama.xcframework
-        embed: true
-        codeSign: true
+    postBuildScripts:
+      - name: "Embed llama.framework"
+        script: |
+          FRAMEWORK_SRC="${PROJECT_DIR}/../llama.cpp/build-apple/llama.xcframework/ios-arm64/llama.framework"
+          FRAMEWORK_DST="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"
+          mkdir -p "${FRAMEWORK_DST}"
+          cp -R "${FRAMEWORK_SRC}" "${FRAMEWORK_DST}/"
+          codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --preserve-metadata=identifier,entitlements "${FRAMEWORK_DST}/llama.framework"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.revive.app
-        DEVELOPMENT_TEAM: ""
+        PRODUCT_BUNDLE_IDENTIFIER: com.anishkataria.revive
+        DEVELOPMENT_TEAM: "H6F2UVW5UT"
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1,2"  # iPhone + iPad
         INFOPLIST_FILE: revive/Info.plist
-        OTHER_LDFLAGS: "-lc++"
+        OTHER_LDFLAGS:
+          - "-lc++"
+          - "-framework"
+          - "llama"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)/../llama.cpp/build-apple/llama.xcframework/ios-arm64"

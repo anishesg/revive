@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import UIKit
 
 // MARK: - Bonjour Advertisement (Worker side)
 

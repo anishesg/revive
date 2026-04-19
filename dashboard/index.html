@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>REVIVE Swarm</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#080808;color:#e0e0e0;font-family:'SF Mono','Fira Code',monospace;font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* Header */
+#hdr{display:flex;align-items:center;gap:20px;padding:10px 18px;border-bottom:1px solid #181818;flex-shrink:0}
+#hdr h1{font-size:17px;font-weight:900;color:#00ff88;letter-spacing:4px;margin-right:4px}
+.hstat{display:flex;flex-direction:column;align-items:center;min-width:48px}
+.hstat-v{font-size:18px;font-weight:700;color:#00ff88;line-height:1}
+.hstat-l{font-size:9px;color:#444;letter-spacing:1px;margin-top:2px}
+#dot{width:8px;height:8px;border-radius:50%;background:#1e1e1e;margin-left:auto;transition:background .3s}
+#dot.live{background:#00ff88;box-shadow:0 0 8px #00ff8866;animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* Layout */
+#body{display:flex;flex:1;overflow:hidden}
+
+/* Sidebar */
+#side{width:220px;border-right:1px solid #181818;display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+#side-head{padding:10px 12px 6px;font-size:9px;color:#333;letter-spacing:2px;border-bottom:1px solid #111}
+#workers{flex:1;overflow-y:auto;padding:10px 10px 6px}
+#workers::-webkit-scrollbar{width:3px}
+#workers::-webkit-scrollbar-thumb{background:#1a1a1a}
+.wcard{background:#0c0c0c;border:1px solid #181818;border-radius:8px;padding:10px;margin-bottom:8px;transition:border-color .3s,box-shadow .3s}
+.wcard.generating{border-color:#00ff8855;box-shadow:0 0 12px #00ff8820}
+.wcard.offline{opacity:.3}
+.wr{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.wdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.wrole{font-size:10px;font-weight:700;letter-spacing:1px}
+.wmodel{font-size:9px;color:#444;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wtps{font-size:21px;font-weight:700;color:#fff;line-height:1}
+.wtps span{font-size:9px;color:#555;font-weight:400}
+.wbar-bg{height:3px;background:#151515;border-radius:2px;margin:6px 0 4px}
+.wbar{height:3px;border-radius:2px;transition:width .6s ease}
+.wmeta{font-size:9px;color:#333}
+
+#add-btn{margin:8px 10px;background:none;border:1px dashed #1e1e1e;border-radius:6px;color:#2a2a2a;padding:7px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .2s;width:calc(100% - 20px)}
+#add-btn:hover{border-color:#00ff8855;color:#00ff8888}
+#add-form{display:none;padding:0 10px 10px}
+#add-form input{width:100%;background:#0f0f0f;border:1px solid #1e1e1e;border-radius:5px;color:#ccc;padding:5px 8px;font-family:inherit;font-size:11px;margin-bottom:4px;outline:none}
+#add-form input:focus{border-color:#00ff8855}
+#add-sub{width:100%;background:#00ff88;border:none;border-radius:5px;color:#000;padding:6px;font-family:inherit;font-weight:700;cursor:pointer;font-size:11px}
+
+/* Chat */
+#chat{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#msgs{flex:1;overflow-y:auto;padding:20px 20px 8px}
+#msgs::-webkit-scrollbar{width:4px}
+#msgs::-webkit-scrollbar-thumb{background:#181818;border-radius:2px}
+
+/* Empty state */
+#empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;pointer-events:none}
+#empty .icon{font-size:44px;opacity:.1}
+#empty .txt{font-size:11px;color:#252525;letter-spacing:2px}
+
+/* Query block — groups user message + all worker replies */
+.qblock{margin-bottom:28px}
+
+/* User bubble */
+.user-msg{
+  display:flex;
+  justify-content:flex-end;
+  margin-bottom:16px;
+}
+.user-bubble{
+  background:#0b1520;
+  border:1px solid #1a3252;
+  border-radius:12px 12px 2px 12px;
+  padding:10px 14px;
+  max-width:70%;
+  color:#ccc;
+  font-size:13px;
+  line-height:1.6;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+
+/* Worker responses grid */
+.responses{display:flex;flex-direction:column;gap:10px}
+
+/* Single worker response card */
+.resp-card{
+  background:#0a0a0a;
+  border:1px solid #181818;
+  border-radius:10px;
+  overflow:hidden;
+  transition:border-color .3s;
+}
+.resp-card.fresh{border-color:#00ff8830}
+.resp-header{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 12px;
+  border-bottom:1px solid #111;
+  background:#0d0d0d;
+}
+.resp-role{font-size:10px;font-weight:700;letter-spacing:1.5px}
+.resp-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.resp-meta{margin-left:auto;font-size:9px;color:#333;display:flex;gap:8px}
+.resp-meta span{color:#2a2a2a}
+.resp-body{
+  padding:12px 14px;
+  color:#bbb;
+  font-size:12.5px;
+  line-height:1.7;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+
+/* System message */
+.sys-msg{
+  text-align:center;
+  font-size:10px;
+  color:#333;
+  font-style:italic;
+  padding:6px 0 16px;
+}
+
+/* Input bar */
+#ibar{display:flex;gap:8px;padding:12px 16px;border-top:1px solid #181818;flex-shrink:0;background:#080808}
+#qin{flex:1;background:#0d0d0d;border:1px solid #222;border-radius:8px;color:#fff;padding:10px 14px;font-family:inherit;font-size:13px;outline:none;transition:border-color .2s;resize:none;height:42px;max-height:120px;overflow-y:auto}
+#qin:focus{border-color:#00ff8855}
+#qin::placeholder{color:#222}
+#sbtn{background:#00ff88;border:none;border-radius:8px;color:#000;padding:10px 22px;font-family:inherit;font-weight:800;font-size:13px;cursor:pointer;transition:opacity .2s;letter-spacing:.5px;align-self:flex-end;height:42px}
+#sbtn:disabled{opacity:.2;cursor:default}
+#sbtn:hover:not(:disabled){opacity:.8}
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <h1>REVIVE</h1>
+  <div class="hstat"><span class="hstat-v" id="hn">0</span><span class="hstat-l">NODES</span></div>
+  <div class="hstat"><span class="hstat-v" id="ht">0.0</span><span class="hstat-l">TOK/S</span></div>
+  <div class="hstat"><span class="hstat-v" id="hk">0</span><span class="hstat-l">TOKENS</span></div>
+  <div id="dot"></div>
+</div>
+
+<div id="body">
+  <div id="side">
+    <div id="side-head">WORKERS</div>
+    <div id="workers"></div>
+    <button id="add-btn" onclick="toggleAdd()">+ add manually</button>
+    <div id="add-form">
+      <input id="af-h" placeholder="IP address (e.g. 192.168.1.x)" />
+      <input id="af-p" placeholder="Port (default 50001)" />
+      <input id="af-r" placeholder="Role (drafter, reasoner…)" />
+      <button id="add-sub" onclick="addWorker()">Add Worker</button>
+    </div>
+  </div>
+  <div id="chat">
+    <div id="msgs">
+      <div id="empty">
+        <div class="icon">⚡</div>
+        <div class="txt">ASK THE SWARM ANYTHING</div>
+      </div>
+    </div>
+    <div id="ibar">
+      <textarea id="qin" placeholder="Ask the swarm anything…" rows="1"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"
+        oninput="autosize(this)"></textarea>
+      <button id="sbtn" onclick="send()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const COLORS={
+  reasoner:'#4A90D9',writer:'#7ED321',concise:'#F5A623',critic:'#D0021B',
+  factchecker:'#9B59B6',drafter:'#1ABC9C',spotter:'#E67E22',aggregator:'#2ECC71',
+  worker:'#00ff88',swarm:'#00ff88',system:'#555',user:'#4A90D9'
+};
+
+let state={workers:[],messages:[],total_tokens:0,collective_tps:0,worker_count:0};
+let busy=false, renderedMsgIds=new Set();
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
+function connect(){
+  const es=new EventSource('/events');
+  const dot=document.getElementById('dot');
+  es.onopen=()=>{dot.className='live'; renderedMsgIds=new Set();};
+  es.onerror=()=>{dot.className='';setTimeout(connect,2500)};
+  es.onmessage=e=>{state=JSON.parse(e.data);render()};
+}
+connect();
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render(){
+  // Header stats
+  document.getElementById('hn').textContent=state.worker_count;
+  document.getElementById('ht').textContent=state.collective_tps.toFixed(1);
+  document.getElementById('hk').textContent=fmt(state.total_tokens);
+
+  // Workers sidebar
+  const wl=document.getElementById('workers');
+  if(!state.workers.length){
+    wl.innerHTML='<div style="color:#1e1e1e;font-size:10px;padding:4px 2px;text-align:center">No workers connected</div>';
+  } else {
+    wl.innerHTML=state.workers.map(w=>{
+      const c=COLORS[w.role]||'#00ff88';
+      const sc=w.status==='generating'?'#00ff88':w.status==='offline'?'#222':'#2a2a2a';
+      const pct=Math.min((w.tps/60)*100,100).toFixed(1);
+      return `<div class="wcard ${w.status}">
+        <div class="wr">
+          <span class="wdot" style="background:${sc}"></span>
+          <span class="wrole" style="color:${c}">${w.role.toUpperCase()}</span>
+        </div>
+        <div class="wmodel">${w.model}</div>
+        <div class="wtps">${w.tps.toFixed(1)}<span> tok/s</span></div>
+        <div class="wbar-bg"><div class="wbar" style="width:${pct}%;background:${c}"></div></div>
+        <div class="wmeta">${fmt(w.tokens||0)} tokens · ${w.host}:${w.port}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // Messages — only render new ones
+  if(!state.messages.length) return;
+  document.getElementById('empty').style.display='none';
+
+  const newMsgs=state.messages.filter(m=>!renderedMsgIds.has(msgId(m)));
+  if(!newMsgs.length) return;
+
+  const msgs=document.getElementById('msgs');
+
+  newMsgs.forEach(m=>{
+    renderedMsgIds.add(msgId(m));
+
+    if(m.role==='user'){
+      // New query block
+      const qblock=document.createElement('div');
+      qblock.className='qblock';
+      qblock.id='qblock-'+(m.qid||m.ts);
+      qblock.innerHTML=`
+        <div class="user-msg">
+          <div class="user-bubble">${esc(m.content)}</div>
+        </div>
+        <div class="responses" id="responses-${m.qid||m.ts}"></div>`;
+      msgs.appendChild(qblock);
+
+    } else if(m.role==='system'){
+      const el=document.createElement('div');
+      el.className='sys-msg';
+      el.textContent=m.content;
+      msgs.appendChild(el);
+
+    } else {
+      // Worker response — attach to its query block
+      const qid=m.qid||'';
+      let respContainer=document.getElementById('responses-'+qid);
+      if(!respContainer){
+        // Orphan response (qid mismatch) — attach to last responses div
+        respContainer=msgs.querySelector('.responses:last-of-type');
+      }
+      if(!respContainer){
+        respContainer=msgs;
+      }
+
+      const c=COLORS[m.role]||'#888';
+      const parts=[];
+      if(m.tps>0)        parts.push(`${(+m.tps).toFixed(1)} tok/s`);
+      if(m.tokens>0)     parts.push(`${m.tokens} tokens`);
+      if(m.latency_ms>0) parts.push(`${m.latency_ms}ms`);
+
+      const card=document.createElement('div');
+      card.className='resp-card fresh';
+      card.innerHTML=`
+        <div class="resp-header">
+          <span class="resp-dot" style="background:${c}"></span>
+          <span class="resp-role" style="color:${c}">${m.role.toUpperCase()}</span>
+          <div class="resp-meta">${parts.map(p=>`<span>${esc(p)}</span>`).join('')}</div>
+        </div>
+        <div class="resp-body">${esc(m.content||'')}</div>`;
+      respContainer.appendChild(card);
+      setTimeout(()=>card.classList.remove('fresh'),2000);
+    }
+  });
+
+  msgs.scrollTop=msgs.scrollHeight;
+}
+
+// ── Send ──────────────────────────────────────────────────────────────────────
+async function send(){
+  const inp=document.getElementById('qin');
+  const btn=document.getElementById('sbtn');
+  const q=inp.value.trim();
+  if(!q||busy) return;
+  busy=true; btn.disabled=true; inp.value=''; inp.style.height='42px';
+  try{
+    await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
+  }finally{
+    setTimeout(()=>{busy=false;btn.disabled=false;},800);
+  }
+}
+
+// ── Add worker ────────────────────────────────────────────────────────────────
+function toggleAdd(){
+  const f=document.getElementById('add-form');
+  f.style.display=f.style.display==='block'?'none':'block';
+}
+async function addWorker(){
+  const h=document.getElementById('af-h').value.trim();
+  if(!h) return;
+  const p=document.getElementById('af-p').value.trim()||'50001';
+  const r=document.getElementById('af-r').value.trim()||'worker';
+  await fetch('/workers/add',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({host:h,port:+p,role:r,model:'Qwen3-0.6B'})});
+  document.getElementById('add-form').style.display='none';
+  ['af-h','af-p','af-r'].forEach(id=>document.getElementById(id).value='');
+}
+
+// ── Textarea auto-resize ──────────────────────────────────────────────────────
+function autosize(el){
+  el.style.height='42px';
+  el.style.height=Math.min(el.scrollHeight,120)+'px';
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function msgId(m){ return m.qid+'|'+m.role+'|'+(m.worker||'')+'|'+m.ts; }
+function fmt(n){ return n>=1000?(n/1000).toFixed(1)+'k':String(n); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
+</script>
+</body>
+</html>

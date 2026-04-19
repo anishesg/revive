@@ -106,6 +106,7 @@ struct CompletionRequest: Codable {
     let max_tokens: Int?
     let temperature: Double?
     let stream: Bool?
+    let stop: [String]?
 }
 
 struct AgentResponse: Codable, Identifiable {

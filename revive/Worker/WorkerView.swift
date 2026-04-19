@@ -38,18 +38,18 @@ class WorkerViewModel: ObservableObject {
 
         // Start HTTP server
         let server = HTTPServer(port: port) { [weak self] request in
-            guard let self, let handler = self.inferenceHandler else {
+            guard let handler = await self?.inferenceHandler else {
                 return ("Error: handler not ready", DeviceMetrics.snapshot(
                     tokensGenerated: 0, tokensPerSecond: 0,
                     timeToFirstTokenMs: 0, totalTimeMs: 0))
             }
-            await MainActor.run { self.isGenerating = true; self.status = .generating }
+            await MainActor.run { self?.isGenerating = true; self?.status = .generating }
             let result = await handler.handle(request)
             await MainActor.run {
-                self.isGenerating = false
-                self.status = ProcessInfo.processInfo.thermalState == .serious ? .hot : .idle
-                self.requestsServed += 1
-                self.currentTPS = result.1.tokensPerSecond
+                self?.isGenerating = false
+                self?.status = ProcessInfo.processInfo.thermalState == .serious ? .hot : .idle
+                self?.requestsServed += 1
+                self?.currentTPS = result.1.tokensPerSecond
             }
             return result
         }
@@ -94,6 +94,9 @@ struct WorkerView: View {
     @State private var selectedRole: AgentRole = .drafter
     @State private var port: UInt16 = 50001
     @State private var isSetup = false
+    @State private var isDownloading = false
+    @State private var downloadProgress: Double = 0
+    @State private var downloadError: String?
 
     var body: some View {
         ZStack {
@@ -105,6 +108,7 @@ struct WorkerView: View {
                 setupView
             }
         }
+        .onAppear { loadExistingModel() }
     }
 
     // MARK: - Setup screen
@@ -135,8 +139,6 @@ struct WorkerView: View {
             .cornerRadius(12)
 
             Button("Load Model from Files") {
-                // In production: use UIDocumentPickerViewController
-                // For hackathon: models pre-placed in Documents directory
                 let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 let files = (try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil))
                 modelPath = files?.first(where: { $0.pathExtension == "gguf" })
@@ -144,8 +146,31 @@ struct WorkerView: View {
             .buttonStyle(.bordered)
             .tint(.green)
 
+            if isDownloading {
+                VStack(spacing: 8) {
+                    ProgressView(value: downloadProgress)
+                        .tint(.green)
+                    Text(String(format: "Downloading Qwen3-0.6B... %.0f%%", downloadProgress * 100))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.gray)
+                }
+                .padding(.horizontal)
+            } else if modelPath == nil {
+                Button("Download Qwen3-0.6B (378 MB)") {
+                    downloadModel()
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
+            }
+
+            if let error = downloadError {
+                Text(error)
+                    .foregroundColor(.red)
+                    .font(.caption)
+            }
+
             if let path = modelPath {
-                Text("✓ \(path.lastPathComponent)")
+                Text("\u{2713} \(path.lastPathComponent)")
                     .foregroundColor(.green)
                     .font(.caption)
             }
@@ -162,6 +187,48 @@ struct WorkerView: View {
             .disabled(modelPath == nil)
         }
         .padding()
+    }
+
+    func downloadModel() {
+        let urlString = "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf"
+        guard let url = URL(string: urlString) else { return }
+        isDownloading = true
+        downloadError = nil
+        downloadProgress = 0
+
+        let delegate = DownloadDelegate { progress in
+            Task { @MainActor in self.downloadProgress = progress }
+        } onComplete: { tempURL, error in
+            Task { @MainActor in
+                self.isDownloading = false
+                if let error {
+                    self.downloadError = error.localizedDescription
+                    return
+                }
+                guard let tempURL else { return }
+                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let dest = docs.appendingPathComponent("Qwen3-0.6B-Q4_K_M.gguf")
+                try? FileManager.default.removeItem(at: dest)
+                do {
+                    try FileManager.default.moveItem(at: tempURL, to: dest)
+                    self.modelPath = dest
+                } catch {
+                    self.downloadError = error.localizedDescription
+                }
+            }
+        }
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        session.downloadTask(with: url).resume()
+    }
+
+    func loadExistingModel() {
+        if let bundled = Bundle.main.url(forResource: "Qwen3-0.6B-Q4_K_M", withExtension: "gguf") {
+            modelPath = bundled
+            return
+        }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let files = (try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil)) ?? []
+        modelPath = files.first(where: { $0.pathExtension == "gguf" })
     }
 
     // MARK: - Running screen
@@ -247,6 +314,32 @@ struct MetricCard: View {
         .padding(12)
         .background(Color.white.opacity(0.05))
         .cornerRadius(8)
+    }
+}
+
+class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
+    let onProgress: (Double) -> Void
+    let onComplete: (URL?, Error?) -> Void
+
+    init(onProgress: @escaping (Double) -> Void, onComplete: @escaping (URL?, Error?) -> Void) {
+        self.onProgress = onProgress
+        self.onComplete = onComplete
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        onComplete(location, nil)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error { onComplete(nil, error) }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
+                    totalBytesExpectedToWrite: Int64) {
+        if totalBytesExpectedToWrite > 0 {
+            onProgress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+        }
     }
 }
 

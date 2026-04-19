@@ -42,13 +42,25 @@ actor LlamaContext {
         self.model = model
         self.context = context
         self.tokens_list = []
-        self.batch = llama_batch_init(512, 0, 1)
+        self.batch = llama_batch_init(2048, 0, 1)
         self.temporary_invalid_cchars = []
-        let sparams = llama_sampler_chain_default_params()
-        self.sampling = llama_sampler_chain_init(sparams)
-        llama_sampler_chain_add(self.sampling, llama_sampler_init_temp(0.4))
-        llama_sampler_chain_add(self.sampling, llama_sampler_init_dist(1234))
         vocab = llama_model_get_vocab(model)
+        self.sampling = LlamaContext.makeSampler()
+    }
+
+    private static func makeSampler() -> UnsafeMutablePointer<llama_sampler> {
+        let sparams = llama_sampler_chain_default_params()
+        guard let chain = llama_sampler_chain_init(sparams) else {
+            fatalError("llama_sampler_chain_init returned nil")
+        }
+        // Repetition penalty prevents ":bot:bot:bot" degenerate loops.
+        llama_sampler_chain_add(chain, llama_sampler_init_penalties(64, 1.1, 0.0, 0.0))
+        llama_sampler_chain_add(chain, llama_sampler_init_top_k(40))
+        llama_sampler_chain_add(chain, llama_sampler_init_top_p(0.95, 1))
+        llama_sampler_chain_add(chain, llama_sampler_init_min_p(0.05, 1))
+        llama_sampler_chain_add(chain, llama_sampler_init_temp(0.7))
+        llama_sampler_chain_add(chain, llama_sampler_init_dist(UInt32.random(in: 1...UInt32.max)))
+        return chain
     }
 
     deinit {
@@ -292,14 +304,23 @@ actor LlamaContext {
     func clear() {
         tokens_list.removeAll()
         temporary_invalid_cchars.removeAll()
+        is_done = false
+        n_cur = 0
+        n_decode = 0
+        llama_batch_clear(&batch)
         llama_memory_clear(llama_get_memory(context), true)
+        llama_sampler_free(sampling)
+        sampling = LlamaContext.makeSampler()
     }
 
     private func tokenize(text: String, add_bos: Bool) -> [llama_token] {
         let utf8Count = text.utf8.count
         let n_tokens = utf8Count + (add_bos ? 1 : 0) + 1
         let tokens = UnsafeMutablePointer<llama_token>.allocate(capacity: n_tokens)
-        let tokenCount = llama_tokenize(vocab, text, Int32(utf8Count), tokens, Int32(n_tokens), add_bos, false)
+        // parse_special=true so <|im_start|>, <|im_end|>, <|endoftext|> are tokenized
+        // as their actual special-token IDs (not literal characters). Without this,
+        // the model never sees role boundaries and EOS detection never fires.
+        let tokenCount = llama_tokenize(vocab, text, Int32(utf8Count), tokens, Int32(n_tokens), add_bos, true)
 
         var swiftTokens: [llama_token] = []
         for i in 0..<tokenCount {

@@ -1,6 +1,7 @@
 import Foundation
 
 /// Routes queries to the right subset of workers based on query classification.
+@MainActor
 class QueryRouter {
     private let swarmManager: SwarmManager
     private let aggregator: Aggregator

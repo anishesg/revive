@@ -80,7 +80,8 @@ class SwarmManager: ObservableObject {
             messages: [ChatMessage(role: "user", content: prompt)],
             max_tokens: 150,
             temperature: 0.7,
-            stream: false
+            stream: false,
+            stop: ["<|im_end|>", "|im_end|", "</s>"]
         )
         request.httpBody = try? JSONEncoder().encode(body)
 

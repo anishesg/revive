@@ -14,8 +14,13 @@ actor InferenceHandler {
     }
 
     func handle(_ request: CompletionRequest) async -> (String, ResponseMetrics) {
-        let userMessage = request.messages.last(where: { $0.role == "user" })?.content ?? ""
+        var userMessage = request.messages.last(where: { $0.role == "user" })?.content ?? ""
         let maxTokens = request.max_tokens ?? 150
+
+        // Qwen3-specific: disable thinking mode for conciseness
+        if !userMessage.contains("/no_think") && !userMessage.contains("/think") {
+            userMessage += " /no_think"
+        }
 
         let prompt = buildPrompt(system: agentRole.systemPrompt, user: userMessage)
 
@@ -50,7 +55,21 @@ actor InferenceHandler {
             totalTimeMs: totalMs
         )
 
-        return (output, metrics)
+        let cleaned = cleanOutput(output)
+        return (cleaned, metrics)
+    }
+
+    // MARK: - Output cleanup
+
+    private func cleanOutput(_ raw: String) -> String {
+        var s = raw
+        // Strip <think>...</think> blocks (Qwen3 reasoning — in /no_think mode these are empty)
+        s = s.replacingOccurrences(of: #"<think>[\s\S]*?</think>"#, with: "", options: .regularExpression)
+        // Strip any leftover ChatML markers that leaked through
+        for tag in ["<|im_end|>", "<|im_start|>", "</s>", "<|endoftext|>"] {
+            s = s.replacingOccurrences(of: tag, with: "")
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Prompt formatting (ChatML)
@@ -62,6 +81,7 @@ actor InferenceHandler {
         <|im_start|>user
         \(user)<|im_end|>
         <|im_start|>assistant
+
         """
     }
 }
