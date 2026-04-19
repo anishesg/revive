@@ -1,0 +1,39 @@
+# Device tier definitions. Each tier maps a RAM envelope to a quantization
+# profile and a pruning profile. Used by export/export_tier_matrix.py.
+#
+# Roles skip tiers when the combination is not useful (e.g. reasoning-heavy
+# roles at the ewaste tier — a pruned Q2_K Reasoner on a Pi 3 is worse than
+# not running it at all).
+
+tiers:
+  ewaste:
+    ram_mb_min: 1024
+    ram_mb_max: 3072
+    quant: Q2_K
+    prune_profile: aggressive
+    example_devices: [iPhone 6s, iPhone 7, Pi 3, 3GB Android]
+    roles: [spotter, drafter, concise]
+
+  budget:
+    ram_mb_min: 3072
+    ram_mb_max: 4096
+    quant: Q3_K_S
+    prune_profile: moderate
+    example_devices: [iPhone 8, iPhone X, Pi 4 4GB, 4GB Android]
+    roles: [spotter, drafter, concise, reasoner, writer, critic, factchecker, aggregator]
+
+  standard:
+    ram_mb_min: 4096
+    ram_mb_max: 6144
+    quant: Q4_K_M
+    prune_profile: none
+    example_devices: [iPhone 12, iPhone 13, iPhone 14, Pi 5 8GB, 6GB Android]
+    roles: [spotter, drafter, concise, reasoner, writer, critic, factchecker, aggregator]
+
+  modern:
+    ram_mb_min: 6144
+    ram_mb_max: 65536
+    quant: Q5_K_M
+    prune_profile: none
+    example_devices: [iPhone 15 Pro, Pixel 8, MacBook M-series]
+    roles: [spotter, drafter, concise, reasoner, writer, critic, factchecker, aggregator]

@@ -1,0 +1,31 @@
+# Per-role pruning profiles. Keys are role names; values specify the
+# aggressiveness of layer pruning when a device tier asks for it.
+#
+# drop_fraction: fraction of transformer blocks to remove
+# min_keep:      floor on kept blocks (safety net; never go below)
+# strategy:      block_importance (cosine similarity of hidden states;
+#                arXiv 2403.17887). Other strategies can be added later.
+
+profiles:
+  aggressive:
+    drop_fraction: 0.40
+    min_keep: 8
+    strategy: block_importance
+  moderate:
+    drop_fraction: 0.25
+    min_keep: 12
+    strategy: block_importance
+  none:
+    drop_fraction: 0.0
+    min_keep: 0
+    strategy: none
+
+roles:
+  spotter: aggressive
+  drafter: moderate
+  concise: moderate
+  reasoner: none
+  writer: none
+  critic: none
+  factchecker: none
+  aggregator: none
