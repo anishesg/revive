@@ -47,9 +47,11 @@ class BMCCore:
 
     MAX_WORKERS = 6
 
-    def __init__(self, writer: asyncio.StreamWriter, loop: asyncio.AbstractEventLoop):
+    def __init__(self, writer: asyncio.StreamWriter, loop: asyncio.AbstractEventLoop,
+                 instance_id: str = "bmc0"):
         self.writer = writer
         self.loop = loop
+        self.instance_id = instance_id
         self.workers: list[SimWorker] = []
         self.num_layers = 0
         self.cluster_state = "down"
@@ -64,6 +66,7 @@ class BMCCore:
 
     def _boot(self):
         self._emit(f"READY {PROTOCOL_VERSION}")
+        self._emit(f"ROLE {self.instance_id}")
 
     def _set_state(self, new_state: str):
         if new_state == self.cluster_state:
@@ -227,54 +230,78 @@ class BMCCore:
 
 # ─── TCP transport (one connection at a time — emulating the single USB serial link) ──
 
-async def _handle_conn(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    loop = asyncio.get_running_loop()
-    core = BMCCore(writer, loop)
-    stop = asyncio.Event()
+def make_handler(instance_id: str):
+    """Return a connection handler bound to this instance_id. Each TCP
+    connection gets its own fresh BMCCore (just like each USB serial
+    open on a real Arduino resets the board)."""
+    async def _handle_conn(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        loop = asyncio.get_running_loop()
+        core = BMCCore(writer, loop, instance_id=instance_id)
+        stop = asyncio.Event()
 
-    async def health_loop():
-        while not stop.is_set():
-            core.health_check()
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=1.0)
-            except asyncio.TimeoutError:
-                pass
+        async def health_loop():
+            while not stop.is_set():
+                core.health_check()
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    pass
 
-    hc_task = asyncio.create_task(health_loop())
-    try:
-        while True:
-            line = await reader.readline()
-            if not line:
-                break
-            core.handle_line(line.decode("utf-8", errors="replace"))
-            await writer.drain()
-    finally:
-        stop.set()
-        await hc_task
-        writer.close()
+        hc_task = asyncio.create_task(health_loop())
         try:
-            await writer.wait_closed()
-        except Exception:
-            pass
-        log.info("connection closed")
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                core.handle_line(line.decode("utf-8", errors="replace"))
+                await writer.drain()
+        finally:
+            stop.set()
+            await hc_task
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            log.info(f"[{instance_id}] connection closed")
+    return _handle_conn
 
 
-async def serve(host: str, port: int):
-    server = await asyncio.start_server(_handle_conn, host, port)
+async def serve(host: str, port: int, instance_id: str = "bmc0"):
+    server = await asyncio.start_server(make_handler(instance_id), host, port)
     addrs = ", ".join(str(s.getsockname()) for s in server.sockets)
-    log.info(f"BMC simulator listening on {addrs}")
+    log.info(f"BMC [{instance_id}] listening on {addrs}")
     async with server:
         await server.serve_forever()
+
+
+async def serve_many(host: str, start_port: int, count: int):
+    """Convenience: spawn `count` BMC instances on consecutive ports
+    starting at `start_port`. Useful for the HA control-plane demo
+    without needing multiple physical Arduinos."""
+    tasks = []
+    for i in range(count):
+        instance_id = f"bmc{i}"
+        port = start_port + i
+        tasks.append(asyncio.create_task(serve(host, port, instance_id)))
+    await asyncio.gather(*tasks)
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=45555)
+    p.add_argument("--instance-id", default="bmc0",
+                   help="identifier this BMC reports on ROLE announcement")
+    p.add_argument("--count", type=int, default=1,
+                   help="spawn N BMC instances on consecutive ports")
     p.add_argument("--log-level", default="INFO")
     args = p.parse_args()
     logging.basicConfig(level=args.log_level, format="%(asctime)s [%(name)s] %(message)s")
-    asyncio.run(serve(args.host, args.port))
+    if args.count > 1:
+        asyncio.run(serve_many(args.host, args.port, args.count))
+    else:
+        asyncio.run(serve(args.host, args.port, args.instance_id))
 
 
 if __name__ == "__main__":

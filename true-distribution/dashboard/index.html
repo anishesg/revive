@@ -14,7 +14,10 @@ body{background:#050505;color:#d8d8d8;font-family:'SF Mono','Fira Code',monospac
 .stat{display:flex;flex-direction:column;align-items:flex-start;min-width:60px}
 .stat-l{font-size:8px;color:#3a3a3a;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:2px}
 .stat-v{font-size:14px;font-weight:700;color:#e8e8e8;line-height:1}
-#state-pill{padding:3px 9px;border-radius:10px;font-size:10px;font-weight:800;letter-spacing:1px;margin-left:auto}
+#bmc-src{margin-left:auto;padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:1px;border:1px solid #1a1a1a;color:#888}
+#bmc-src.arduino{color:#F5A623;border-color:#F5A62344;background:#1a1405}
+#bmc-src.sim{color:#666;border-color:#222}
+#state-pill{padding:3px 9px;border-radius:10px;font-size:10px;font-weight:800;letter-spacing:1px}
 .state-healthy{background:#002f18;color:#00ff88;border:1px solid #00ff8833}
 .state-degraded{background:#3a2a00;color:#ffaa00;border:1px solid #ffaa0033}
 .state-down{background:#3a0000;color:#ff3f3f;border:1px solid #ff3f3f33}
@@ -55,6 +58,26 @@ body{background:#050505;color:#d8d8d8;font-family:'SF Mono','Fira Code',monospac
 .layercell:not(:last-child){border-right:1px solid #0a0a0a}
 .layercell.unowned{background:#151515}
 
+/* BMC HA panel — replica cards */
+#ha-section{display:none}
+#ha-section.on{display:block}
+.replicas{display:flex;flex-direction:column;gap:5px}
+.rcard{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:6px;padding:6px 8px;display:flex;align-items:center;gap:6px;transition:all .3s;position:relative}
+.rcard.leader{border-color:#00ff8866;background:#05130a;box-shadow:0 0 8px #00ff8822}
+.rcard.dead{opacity:.3;border-color:#ff3f3f44}
+.rcard.flash{animation:flash-leader 1.2s ease-out}
+@keyframes flash-leader{0%{box-shadow:0 0 0px #00ff88ff}50%{box-shadow:0 0 18px #00ff88ff}100%{box-shadow:0 0 8px #00ff8822}}
+.rdot{width:6px;height:6px;border-radius:50%;background:#2a2a2a}
+.rcard.leader .rdot{background:#00ff88;box-shadow:0 0 5px #00ff88}
+.rcard.dead .rdot{background:#ff3f3f}
+.rid{font-size:10px;font-weight:700;letter-spacing:0.5px}
+.rleader-tag{font-size:8px;color:#00ff88;background:#00ff8822;padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:4px}
+.rep-chaos{margin-left:auto;display:flex;gap:3px}
+.rep-chaos button{background:transparent;border:1px solid #222;color:#666;padding:1px 6px;border-radius:3px;font-family:inherit;font-size:8px;cursor:pointer;letter-spacing:0.5px}
+.rep-chaos button:hover{border-color:#ff3f3f66;color:#ff6666}
+.rep-chaos button.revive:hover{border-color:#00ff8866;color:#00ff88}
+.ha-legend{font-size:8px;color:#333;letter-spacing:1px;margin-top:6px;line-height:1.5}
+
 /* BMC event log */
 #bmclog{max-height:190px;overflow-y:auto;font-size:10px;line-height:1.5}
 #bmclog::-webkit-scrollbar{width:3px}
@@ -68,6 +91,8 @@ body{background:#050505;color:#d8d8d8;font-family:'SF Mono','Fira Code',monospac
 .evt .line.dead,.evt .line.fail{color:#ff6666}
 .evt .line.alive{color:#00ff88}
 .evt .line.partition{color:#ffaa00}
+.evt .line.leader{color:#00ff88;font-weight:700}
+.evt .arrow.meta{color:#00ff88}
 
 /* RIGHT: chat */
 #chat{flex:1;display:flex;flex-direction:column;overflow:hidden}
@@ -81,7 +106,11 @@ body{background:#050505;color:#d8d8d8;font-family:'SF Mono','Fira Code',monospac
 .asst.aborted{border-color:#ff3f3f55;background:#160505}
 .asst-meta{font-size:9px;color:#3a3a3a;letter-spacing:1px;margin-bottom:8px;text-transform:uppercase}
 .asst-meta .tok{color:#00ff88}
+.asst-body{margin-top:4px}
 .asst-abort{margin-top:10px;padding:8px 10px;background:#1a0606;border:1px solid #ff3f3f33;border-radius:6px;color:#ff9090;font-size:11px}
+.stage-bar{display:flex;height:18px;border-radius:4px;overflow:hidden;margin-bottom:10px;border:1px solid #181818}
+.stage-seg{display:flex;align-items:center;justify-content:center;color:rgba(0,0,0,0.85);font-size:9px;font-weight:700;letter-spacing:0.5px;overflow:hidden;white-space:nowrap;transition:flex .4s}
+.stage-seg span{padding:0 6px;text-shadow:0 1px 0 rgba(255,255,255,0.4)}
 
 #empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;pointer-events:none}
 #empty .icon{font-size:44px;opacity:.1}
@@ -111,6 +140,7 @@ body{background:#050505;color:#d8d8d8;font-family:'SF Mono','Fira Code',monospac
   <div class="stat"><span class="stat-l">WORKERS</span><span class="stat-v" id="workers-count">0</span></div>
   <div class="stat"><span class="stat-l">TOKENS</span><span class="stat-v" id="total-tokens">0</span></div>
   <div class="stat"><span class="stat-l">TOK/S</span><span class="stat-v" id="tps">0.0</span></div>
+  <div id="bmc-src" title="BMC source"></div>
   <div id="state-pill" class="state-disconnected">DISCONNECTED</div>
   <div id="conn"></div>
 </div>
@@ -121,6 +151,11 @@ body{background:#050505;color:#d8d8d8;font-family:'SF Mono','Fira Code',monospac
       <div class="sect-h">CLUSTER TOPOLOGY</div>
       <div id="layerstrip"></div>
       <div id="topology" style="margin-top:12px"></div>
+    </div>
+    <div class="sect" id="ha-section">
+      <div class="sect-h">BMC REPLICAS (HA)</div>
+      <div class="replicas" id="replicas"></div>
+      <div class="ha-legend">one elected leader; unplug it to fail over</div>
     </div>
     <div class="sect" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
       <div class="sect-h">BMC EVENT LOG</div>
@@ -147,6 +182,7 @@ body{background:#050505;color:#d8d8d8;font-family:'SF Mono','Fira Code',monospac
 const WORKER_COLORS = ['#00ff88','#4A90D9','#F5A623','#9B59B6','#E74C3C','#2ECC71'];
 let state = null;
 let renderedQids = new Set();
+let lastLeader = null;  // track leader changes for the flash animation
 
 function connect() {
   const es = new EventSource('/events');
@@ -176,6 +212,20 @@ function render() {
   const pill = document.getElementById('state-pill');
   pill.textContent = (state.bmc.state || 'disconnected').toUpperCase();
   pill.className = 'state-' + (state.bmc.state || 'disconnected');
+
+  // BMC source badge — "ARDUINO" in amber when physical, "SIM" otherwise
+  const src = document.getElementById('bmc-src');
+  const source = state.bmc_source || '';
+  if (source.startsWith('arduino:')) {
+    src.textContent = 'BMC: ARDUINO ' + source.replace('arduino:', '').split('/').pop();
+    src.className = 'arduino';
+  } else if (source.startsWith('simulator:')) {
+    src.textContent = 'BMC: SIMULATOR';
+    src.className = 'sim';
+  } else {
+    src.textContent = '';
+    src.className = '';
+  }
 
   // Layer strip — colored bars showing which worker owns each layer
   const strip = document.getElementById('layerstrip');
@@ -222,18 +272,52 @@ function render() {
     </div>`;
   }).join('');
 
+  // BMC HA panel
+  const haSection = document.getElementById('ha-section');
+  if (state.bmc_ha) {
+    haSection.classList.add('on');
+    const repDiv = document.getElementById('replicas');
+    const leader = state.bmc_ha.leader;
+    const leaderChanged = (lastLeader !== null && lastLeader !== leader);
+    repDiv.innerHTML = state.bmc_ha.replicas.map(r => {
+      const classes = ['rcard'];
+      if (r.is_leader) classes.push('leader');
+      if (!r.alive) classes.push('dead');
+      if (r.is_leader && leaderChanged) classes.push('flash');
+      const ageTxt = r.last_seen_age_ms != null
+        ? `${(r.last_seen_age_ms/1000).toFixed(1)}s ago`
+        : 'offline';
+      const tag = r.is_leader ? '<span class="rleader-tag">LEADER</span>' : '';
+      return `<div class="${classes.join(' ')}" title="${esc(r.endpoint)} · last seen ${esc(ageTxt)}">
+        <span class="rdot"></span>
+        <span class="rid">${esc(r.id.toUpperCase())}</span>
+        ${tag}
+        <div class="rep-chaos">
+          ${r.alive
+            ? `<button onclick="bmcChaos('kill','${r.id}')">KILL</button>`
+            : `<button class="revive" onclick="bmcChaos('revive','${r.id}')">REVIVE</button>`}
+        </div>
+      </div>`;
+    }).join('');
+    lastLeader = leader;
+  } else {
+    haSection.classList.remove('on');
+    lastLeader = null;
+  }
+
   // BMC event log
   const evtDiv = document.getElementById('bmclog');
   evtDiv.innerHTML = state.bmc_events.slice(-40).map(evt => {
-    const isToBmc = evt.dir === '→';
-    const arrowClass = isToBmc ? 'to-bmc' : 'from-bmc';
+    const arrowClass = evt.dir === '→' ? 'to-bmc' :
+                       evt.dir === '**' ? 'meta' : 'from-bmc';
     const line = evt.line;
-    const lineClass = (line.startsWith('ACK ') ? 'ack' :
+    const lineClass = (line.startsWith('LEADER_CHANGED') ? 'leader' :
+                       line.startsWith('ACK ') ? 'ack' :
                        line.startsWith('DEAD') ? 'dead' :
                        line.startsWith('FAIL') ? 'fail' :
                        line.startsWith('ALIVE') ? 'alive' :
                        line.startsWith('PARTITION') ? 'partition' : '');
-    return `<div class="evt"><span class="arrow ${arrowClass}">${evt.dir}</span><span class="line ${lineClass}">${esc(line)}</span></div>`;
+    return `<div class="evt"><span class="arrow ${arrowClass}">${esc(evt.dir)}</span><span class="line ${lineClass}">${esc(line)}</span></div>`;
   }).join('');
   evtDiv.scrollTop = evtDiv.scrollHeight;
 
@@ -265,9 +349,27 @@ function render() {
         const meta = [];
         if (t.asst.tokens > 0) meta.push(`<span class="tok">${t.asst.tokens} tok</span>`);
         if (t.asst.tps > 0) meta.push(`${t.asst.tps.toFixed(1)} tok/s`);
+        if (t.asst.step_latency_ms > 0) meta.push(`${t.asst.step_latency_ms.toFixed(0)}ms/step`);
         block += `<div class="${classes.join(' ')}">`;
         if (meta.length) block += `<div class="asst-meta">${meta.join(' · ')}</div>`;
-        block += esc(t.asst.content || (state.busy ? '…' : ''));
+        // Per-stage latency strip — colored bars, one per worker, widths
+        // proportional to that stage's avg latency. Makes the bottleneck obvious.
+        const lats = t.asst.avg_stage_latencies_ms || [];
+        if (lats.length > 0 && state.workers.length === lats.length) {
+          const total = lats.reduce((a, b) => a + b, 0) || 1;
+          let barHtml = '<div class="stage-bar">';
+          lats.forEach((lat, i) => {
+            const w = state.workers[i];
+            const color = workerColor(w.id, state.workers);
+            const pct = (lat / total) * 100;
+            barHtml += `<div class="stage-seg" style="flex:${lat};background:${color}aa" `
+                     + `title="${esc(w.id)}: ${lat.toFixed(1)}ms avg">`
+                     + `<span>${esc(w.id)} ${lat.toFixed(0)}ms</span></div>`;
+          });
+          barHtml += '</div>';
+          block += barHtml;
+        }
+        block += `<div class="asst-body">${esc(t.asst.content || (state.busy ? '…' : ''))}</div>`;
         if (t.asst.aborted) {
           block += `<div class="asst-abort">⚠ ${esc(t.asst.abort_reason)}</div>`;
         }
@@ -299,6 +401,15 @@ async function send() {
 async function chaos(action, workerId) {
   try {
     await fetch('/chaos/' + action, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({worker_id: workerId}) });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function bmcChaos(action, replicaId) {
+  const ep = action === 'kill' ? '/chaos/bmc_kill' : '/chaos/bmc_revive';
+  try {
+    await fetch(ep, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({replica_id: replicaId}) });
   } catch (e) {
     console.error(e);
   }

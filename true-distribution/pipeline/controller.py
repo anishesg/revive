@@ -105,31 +105,47 @@ class TCPSimLink(BMCLink):
 
 
 class SerialLink(BMCLink):
-    """Real Arduino over USB serial. Requires pyserial-asyncio. Not used in
-    the local software demo — here for reference."""
-    def __init__(self, device: str, baud: int = 115200):
+    """Real Arduino over USB serial. Pulls pyserial-asyncio only when this
+    class is instantiated, so the simulator path works without the extra
+    dependency installed.
+
+    On macOS, plugging in an Arduino Uno gives /dev/tty.usbmodem* and/or
+    /dev/cu.usbmodem*. Prefer cu.* (non-blocking open). Linux: /dev/ttyACM0.
+    Use find_arduino_device() to autodetect.
+    """
+    def __init__(self, device: str, baud: int = 115200, boot_delay_s: float = 2.0):
         self.device = device
         self.baud = baud
+        self.boot_delay_s = boot_delay_s
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._reader = None
         self._writer = None
         self._task = None
 
     async def connect(self):
-        import serial_asyncio  # noqa: only imported if user actually wires an Arduino
+        import serial_asyncio  # lazy import
         self._reader, self._writer = await serial_asyncio.open_serial_connection(
             url=self.device, baudrate=self.baud
         )
+        # Arduino Uno resets when the host opens the serial port (DTR toggle).
+        # Give the firmware its bootloader + setup() time before we talk to it.
+        log.info(f"opened {self.device} @ {self.baud} baud; waiting {self.boot_delay_s}s for Arduino reset")
+        await asyncio.sleep(self.boot_delay_s)
         self._task = asyncio.create_task(self._reader_loop())
-        log.info(f"connected to Arduino at {self.device} @ {self.baud} baud")
+        log.info(f"connected to Arduino at {self.device}")
 
     async def _reader_loop(self):
         assert self._reader is not None
-        while True:
-            line = await self._reader.readline()
-            if not line:
-                break
-            await self._queue.put(line.decode("utf-8", errors="replace").rstrip())
+        try:
+            while True:
+                line = await self._reader.readline()
+                if not line:
+                    break
+                await self._queue.put(line.decode("utf-8", errors="replace").rstrip())
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning(f"serial reader stopped: {e}")
 
     async def send(self, line: str):
         if not self._writer:
@@ -140,11 +156,46 @@ class SerialLink(BMCLink):
     async def close(self):
         if self._task:
             self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
         if self._writer:
             self._writer.close()
 
     def lines(self) -> asyncio.Queue:
         return self._queue
+
+
+def find_arduino_device() -> Optional[str]:
+    """Scan attached serial ports for something that looks like an Arduino Uno.
+    Returns a /dev/... path or None. Requires pyserial (not pyserial-asyncio)."""
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        return None
+
+    # Prefer matches with VID/PID of the classic Uno or common clones
+    arduino_vids = {
+        0x2341,  # Arduino LLC / Arduino SA
+        0x2A03,  # Arduino SRL
+        0x1A86,  # QinHeng CH340 (clone Unos)
+        0x0403,  # FTDI (older clones)
+        0x10C4,  # SiLabs CP210x (some clones)
+    }
+    candidates = []
+    for port in list_ports.comports():
+        if port.vid in arduino_vids:
+            candidates.append(port.device)
+        elif "usbmodem" in (port.device or "") or "ttyACM" in (port.device or ""):
+            candidates.append(port.device)
+
+    if not candidates:
+        return None
+    # On macOS there are two entries per device (tty.* and cu.*); cu.* is
+    # preferred because it won't block on modem control lines.
+    cu = [c for c in candidates if "/cu." in c]
+    return (cu or candidates)[0]
 
 
 class ClusterController:

@@ -76,9 +76,19 @@ echo ""
 echo "Press Ctrl-C to stop. Workers will keep running — run scripts/stop_local.sh to stop them."
 echo ""
 
+EXTRA=()
+# If $SERIAL env var is set (e.g. SERIAL=/dev/tty.usbmodem14101), use the real
+# Arduino BMC. If SERIAL=auto, try to detect one.
+if [ "${SERIAL:-}" = "auto" ]; then
+  EXTRA+=(--auto-serial)
+elif [ -n "${SERIAL:-}" ]; then
+  EXTRA+=(--serial-device "$SERIAL")
+fi
+
 exec python -m dashboard.server \
   --model "$MODEL" \
   --workers "${WORKER_URLS[@]}" \
   --bmc-port 45555 \
   --port 4100 \
-  --log-level INFO
+  --log-level INFO \
+  "${EXTRA[@]}"

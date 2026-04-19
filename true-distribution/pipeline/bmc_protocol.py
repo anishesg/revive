@@ -49,9 +49,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2  # v2 adds ROLE announcement for HA clusters
 HEARTBEAT_INTERVAL_MS = 3000
 HEARTBEAT_TIMEOUT_MS = 6000
+
+# Leader-election constants (host-side deterministic election).
+BMC_DEAD_AFTER_MS = 3000  # host gives up on a BMC that misses N seconds of events
 
 
 @dataclass
