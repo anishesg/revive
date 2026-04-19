@@ -2,7 +2,18 @@
 
 **Distributed LLM inference across consumer devices. Phones, tablets, Raspberry Pis, and laptops form a swarm that thinks together.**
 
-REVIVE turns everyday devices into a collective AI system. Each device loads a small language model and takes on a specialized role — Reasoner, Writer, Critic, Factchecker — while a coordinator fans out queries across the swarm and synthesizes responses using Mixture-of-Agents (MoA). No cloud. No GPUs. Just the devices in the room.
+REVIVE turns everyday devices into a collective AI system. No cloud. No GPUs. Just the devices in the room.
+
+The repo implements **two complementary strategies** for edge LLM inference, plus a shared build pipeline that feeds them. The full system design, contracts between modules, and deployment flow are in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+**Strategy 1 — Mixture-of-Agents (MoA)** &nbsp;(`revive/`, `android/`, `rpi/`, `macos/`)
+Each device runs a *complete* small model with a specialized role — Reasoner, Writer, Critic, Factchecker, etc. A coordinator fans queries out in parallel; an aggregator synthesizes the best answer. Only text (kilobytes) crosses the network, so consumer WiFi jitter is tolerated and any device can drop out without breaking the swarm.
+
+**Strategy 2 — True Pipeline-Parallel Distribution** &nbsp;(`true-distribution/`)
+One Qwen3 model with its transformer layers *physically split* across multiple devices. Hidden states travel over HTTP; each worker owns only a slice of the weights. A **$10 Arduino Uno** runs the cluster's management plane (BMC) — it owns the authoritative partition table and refuses to let the coordinator route through a node it has declared dead. Verified token-for-token correct against the reference HuggingFace model. Details in [`true-distribution/README.md`](true-distribution/README.md).
+
+**Build pipeline** &nbsp;(`LLM/`)
+Offline pipeline that takes Qwen3 bases and produces role-specialized, device-tiered GGUFs: expanded data generation (Haiku + local Qwen3-4B distillation), QLoRA fine-tuning, ShortGPT layer pruning, imatrix-calibrated K-quant export at Q2_K / Q3_K_S / Q4_K_M / Q5_K_M. Emits a full role × device-tier matrix with a SHA-256 `manifest.json`. Currently feeds Strategy 1; Strategy 2 consumes fp16 weights directly from HuggingFace.
 
 Built at HackPrinceton 2025.
 
@@ -10,6 +21,7 @@ Built at HackPrinceton 2025.
 
 ## Table of Contents
 
+- [Project Status](#project-status)
 - [How It Works](#how-it-works)
 - [Architecture](#architecture)
 - [Supported Platforms](#supported-platforms)
@@ -35,7 +47,53 @@ Built at HackPrinceton 2025.
 
 ---
 
+## Project Status
+
+**MoA Runtime — production:**
+- iOS/iPadOS app with Worker and Coordinator modes, in-process llama.cpp via Metal (`revive/`)
+- Android app with native JNI llama.cpp, foreground service, Android NSD discovery (`android/`)
+- Raspberry Pi mesh aggregator with systemd auto-start (`rpi/`)
+- MacBook CLI (Metal on Apple Silicon, CPU on Intel) with Worker + interactive Coordinator modes (`macos/`)
+- Two web dashboards: PWA bundled with the iOS coordinator (`revive/Coordinator/WebDashboard/`) and a standalone mDNS aggregator UI (`dashboard/`)
+- mDNS auto-discovery and OpenAI-compatible `POST /v1/chat/completions` on every platform
+
+**True Pipeline-Parallel Distribution — working end-to-end** (`true-distribution/`):
+- Layer-sliced Qwen3 loading with per-slice KV cache
+- N-stage HTTP ring with a custom binary wire protocol (fp16 hidden states, ~2 KB/token)
+- Heterogeneous layer partitioner (PipeEdge-DP + greedy fallback) that minimizes the slowest pipeline stage
+- Arduino Uno BMC firmware (`arduino/revive_bmc.ino`) plus a Python simulator (`bmc_sim.py`) that speaks the identical line protocol over TCP
+- Multi-BMC HA controller with leader election and replica failover
+- Live chaos-engineering dashboard: kill/heal buttons, BMC event log, per-stage latency bars, token streaming
+- Benchmark CLI reporting tok/s, prefill vs decode, per-stage latency, wire bandwidth
+- 11 self-contained tests (correctness verified token-for-token against single-model HuggingFace reference under greedy sampling)
+
+**LLM Build Pipeline — functional end-to-end** (`LLM/`):
+- Expanded dataset generation: Claude Haiku + local Qwen3-4B teacher distillation → ~1500 examples/role (`LLM/data/`)
+- Per-role QLoRA fine-tuning for all 8 roles on Qwen3-0.6B and Qwen3-1.7B bases (`LLM/train/`)
+- Role-aware ShortGPT block-importance layer pruning (`LLM/prune/`)
+- imatrix-calibrated K-quant export at Q2_K / Q3_K_S / Q4_K_M / Q5_K_M (`LLM/quantize/`)
+- Role × device-tier matrix export producing up to 32 GGUFs with a SHA-256 `manifest.json` (`LLM/export/`)
+- Per-role evaluation harness against a Qwen3-4B teacher (`LLM/eval/`)
+- AWS EC2 spot-instance launcher that trains end-to-end and uploads to S3 (`LLM/scripts/aws_*.sh`)
+
+**Research & probes:**
+- `llamacpp-stages/tests/probe_embd.py` — gate test determining whether `llama-cpp-python`'s `batch.embd` input path bypasses only the embedding lookup (needed for a future llama.cpp-backed pipeline-parallel path).
+
+**Documentation:**
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system-level design of MoA + LLM build pipeline, module contracts, deployment flow, glossary
+- [PROTOCOL.md](PROTOCOL.md) — mDNS service type, TXT record fields, HTTP API contract, default ports
+- [LLM/README.md](LLM/README.md) — build-pipeline internals and quick start
+- [true-distribution/README.md](true-distribution/README.md) — pipeline-parallel architecture, BMC protocol, chaos-demo walkthrough, benchmark numbers
+
+**On the roadmap:**
+- MoA ([ARCHITECTURE.md §6](ARCHITECTURE.md#6-future-work)): on-device tier auto-selection from `manifest.json`; heterogeneous prompt formats; swarm-level speculative decoding; modular LoRA adapter distribution.
+- True Distribution ([true-distribution/README.md §Status](true-distribution/README.md#status)): pipeline overlap for long-prompt prefill (Jupiter intra-sequence PP); iOS port (Swift worker wrapping a forked llama.cpp with a `llama_decode_layers(start, end)` API); GGUF Q4_K_M quantization for 4× memory + bandwidth savings.
+
+---
+
 ## How It Works
+
+*This section describes Strategy 1 (MoA). The pipeline-parallel flow is documented separately in [`true-distribution/README.md`](true-distribution/README.md).*
 
 ```
 You type a question
@@ -76,11 +134,22 @@ The key insight: **many small models with different perspectives, running in par
 
 ## Architecture
 
-### Why MoA Instead of Model Sharding
+The sections below describe **Strategy 1 (MoA)**. For the pipeline-parallel internals — layer partitioning, hidden-state wire format, Arduino BMC control plane, chaos-engineering demo — see [`true-distribution/README.md`](true-distribution/README.md).
 
-Traditional distributed inference splits one model across devices (pipeline parallelism). This requires tight synchronization and sends megabytes of activation tensors between devices at every layer boundary. Consumer WiFi has 5-50ms latency with unpredictable jitter — pipeline parallelism falls apart.
+### MoA vs. Pipeline-Parallel: when to use each
 
-REVIVE takes the opposite approach. Each device runs a **complete** small model independently. Only the text outputs (kilobytes) travel over the network. If a device drops out, the others still work. If a phone overheats, it gracefully degrades. The coordinator collects whatever responses arrive within the timeout and synthesizes from what it has.
+The two strategies answer different questions. Both are implemented in this repo.
+
+| | **MoA** (`revive/`, `android/`, `rpi/`, `macos/`) | **Pipeline-parallel** (`true-distribution/`) |
+|--|----|----|
+| What's distributed | Different *models* on different devices | Different *layers* of one model on different devices |
+| Wire payload | Text (kilobytes per query) | fp16 hidden states (~2 KB per token, per hop) |
+| Failure mode | Graceful degrade — missing role omitted from synthesis | Hard stop — BMC refuses to route through a dead node |
+| WiFi sensitivity | Insensitive to jitter (text is small, work is parallel) | Sensitive to per-hop latency (serial dependency between stages) |
+| Best for | Many moderate devices answering in parallel with different perspectives | Running *one bigger model* than any single device could host |
+| Ensemble method | Text-level MoA synthesis | None — a single coherent forward pass |
+
+The MoA choice below is optimized for consumer WiFi's 5–50ms latency with unpredictable jitter: each device runs a **complete** small model independently, only the text outputs (kilobytes) travel over the network, and if a phone overheats or drops off the swarm keeps working. `true-distribution/` makes the opposite trade-off and proves it works — the measured bandwidth on a 3-worker Qwen3-0.6B ring is 58 KB/s, 214× under 802.11n WiFi capacity. Pipeline parallelism is compute-bound, not network-bound, once hidden states are fp16.
 
 ### Components
 
@@ -799,8 +868,41 @@ revive/
 │   ├── revive-cli.py                # Worker or coordinator mode, Metal GPU
 │   └── setup.sh                     # Build llama.cpp, download model
 │
-├── ARCHITECTURE.md                  # System design: two-module architecture, contracts
-├── PROTOCOL.md                      # Cross-platform protocol specification
+├── true-distribution/               # Pipeline-parallel runtime (one model, layers split)
+│   ├── pipeline/
+│   │   ├── worker.py                # Pipeline stage: layer-sliced forward + per-stage KV cache
+│   │   ├── coordinator.py           # Ring driver: streams tokens, respects BMC's view
+│   │   ├── partitioner.py           # Greedy + PipeEdge-DP layer assignment
+│   │   ├── protocol.py              # Tensor wire format (coordinator ↔ worker)
+│   │   ├── bmc_protocol.py          # Host ↔ Arduino line protocol (v2)
+│   │   ├── bmc_sim.py               # Python BMC firmware simulator (TCP)
+│   │   ├── controller.py            # Host-side BMC client (serial or TCP)
+│   │   ├── multi_bmc.py             # Multi-BMC HA (leader election, replica failover)
+│   │   └── net_utils.py
+│   ├── arduino/
+│   │   ├── revive_bmc.ino           # Production BMC firmware for Arduino Uno
+│   │   └── README.md                # How to flash and verify
+│   ├── dashboard/
+│   │   ├── server.py                # Embeds BMC sim + controller + coordinator
+│   │   └── index.html               # Topology, chaos buttons, per-stage latency, token stream
+│   ├── scripts/
+│   │   ├── launch_cluster.sh        # Full stack: workers + dashboard (SERIAL= for Arduino)
+│   │   ├── launch_local.sh          # Spawn N workers for ad-hoc dev
+│   │   ├── stop_local.sh            # Kill workers
+│   │   ├── benchmark.py             # Throughput + per-stage latency + bandwidth report
+│   │   └── demo_full.py             # CLI chaos-engineering demo
+│   ├── tests/                       # 11 self-contained test runners (no pytest needed)
+│   └── README.md                    # Pipeline-parallel architecture + BMC protocol
+│
+├── dashboard/                       # Standalone mDNS swarm dashboard (runs independently)
+│   ├── server.py                    # aiohttp server with Bonjour discovery, SSE streaming
+│   └── index.html                   # Live worker list + chat
+│
+├── llamacpp-stages/                 # Research: llama.cpp slicing probes
+│   └── tests/probe_embd.py          # Gate test for batch.embd bypass path
+│
+├── ARCHITECTURE.md                  # System design (MoA + LLM build pipeline)
+├── PROTOCOL.md                      # Cross-platform mDNS/HTTP protocol spec
 ├── project.yml                      # XcodeGen project config
 └── setup.sh                         # iOS one-time setup (build xcframework)
 ```
