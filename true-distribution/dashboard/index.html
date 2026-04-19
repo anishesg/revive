@@ -2,421 +2,1174 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>REVIVE Cluster</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REVIVE — distributed inference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#050505;color:#d8d8d8;font-family:'SF Mono','Fira Code',monospace;font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  :root {
+    --bg: #0a0a0a;
+    --bg-1: #111111;
+    --bg-2: #161616;
+    --bg-3: #1c1c1c;
+    --line: #1f1f1f;
+    --line-strong: #2a2a2a;
+    --text: #e6e6e6;
+    --text-dim: #808080;
+    --text-subtle: #4a4a4a;
+    --text-faint: #2e2e2e;
+    --accent: #00ff88;
+    --accent-dim: #00c96d;
+    --accent-alpha: rgba(0,255,136,0.1);
+    --arduino: #f5a623;
+    --arduino-alpha: rgba(245,166,35,0.1);
+    --user: #6ea8fe;
+    --user-alpha: rgba(110,168,254,0.08);
+    --err: #ff5d5d;
+    --warn: #ffb347;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
 
-/* header */
-#hdr{display:flex;align-items:center;gap:24px;padding:10px 18px;border-bottom:1px solid #141414;flex-shrink:0;background:#070707}
-#hdr h1{font-size:16px;font-weight:900;color:#00ff88;letter-spacing:4px}
-.hsep{width:1px;height:24px;background:#1a1a1a}
-.stat{display:flex;flex-direction:column;align-items:flex-start;min-width:60px}
-.stat-l{font-size:8px;color:#3a3a3a;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:2px}
-.stat-v{font-size:14px;font-weight:700;color:#e8e8e8;line-height:1}
-#bmc-src{margin-left:auto;padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:1px;border:1px solid #1a1a1a;color:#888}
-#bmc-src.arduino{color:#F5A623;border-color:#F5A62344;background:#1a1405}
-#bmc-src.sim{color:#666;border-color:#222}
-#state-pill{padding:3px 9px;border-radius:10px;font-size:10px;font-weight:800;letter-spacing:1px}
-.state-healthy{background:#002f18;color:#00ff88;border:1px solid #00ff8833}
-.state-degraded{background:#3a2a00;color:#ffaa00;border:1px solid #ffaa0033}
-.state-down{background:#3a0000;color:#ff3f3f;border:1px solid #ff3f3f33}
-.state-disconnected{background:#222;color:#555;border:1px solid #333}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  ::selection { background: var(--accent); color: #000; }
 
-/* body */
-#body{display:flex;flex:1;overflow:hidden}
+  /* ───── Top bar ─────────────────────────────────────────────────────── */
+  .topbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(8,8,8,0.92);
+    backdrop-filter: blur(12px);
+    flex-shrink: 0;
+    height: 44px;
+  }
+  .logo {
+    font-family: var(--mono);
+    font-weight: 800;
+    letter-spacing: 4px;
+    color: var(--accent);
+    font-size: 13px;
+  }
+  .divider { width: 1px; height: 18px; background: var(--line-strong); }
+  .stat-chip {
+    display: flex; align-items: baseline; gap: 6px;
+    font-family: var(--mono); font-size: 11px;
+  }
+  .stat-chip .k { color: var(--text-subtle); text-transform: uppercase; letter-spacing: 1.2px; font-size: 9px; }
+  .stat-chip .v { color: var(--text); font-weight: 600; }
+  .pill {
+    padding: 3px 10px; border-radius: 999px;
+    font-family: var(--mono); font-size: 10px;
+    font-weight: 700; letter-spacing: 1.2px;
+    border: 1px solid transparent;
+  }
+  .pill.healthy { background: var(--accent-alpha); color: var(--accent); border-color: rgba(0,255,136,0.25); }
+  .pill.degraded { background: rgba(255,179,71,0.12); color: var(--warn); border-color: rgba(255,179,71,0.3); }
+  .pill.down { background: rgba(255,93,93,0.12); color: var(--err); border-color: rgba(255,93,93,0.3); }
+  .pill.disconnected { background: var(--bg-2); color: var(--text-subtle); border-color: var(--line); }
 
-/* LEFT: cluster column */
-#side{width:280px;border-right:1px solid #141414;display:flex;flex-direction:column;overflow:hidden;background:#060606}
-.sect{padding:12px 14px;border-bottom:1px solid #101010}
-.sect-h{font-size:9px;color:#333;letter-spacing:2px;margin-bottom:10px}
+  .bmc-badge {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: 999px;
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    letter-spacing: 1px; color: var(--text-dim);
+    border: 1px solid var(--line);
+    background: var(--bg-2);
+    cursor: default;
+  }
+  .bmc-badge.arduino { color: var(--arduino); border-color: rgba(245,166,35,0.35); background: var(--arduino-alpha); }
+  .bmc-badge .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--text-subtle);
+  }
+  .bmc-badge.arduino .dot { background: var(--arduino); box-shadow: 0 0 8px var(--arduino); animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
-/* cluster topology viz */
-#topology{display:flex;flex-direction:column;gap:7px}
-.wcard{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:8px;padding:10px;transition:all .25s}
-.wcard.dead{opacity:.35;border-color:#ff3f3f44}
-.wcard.has-layers{border-color:#00ff8833}
-.wcard .row1{display:flex;align-items:center;gap:6px;margin-bottom:6px}
-.wdot{width:7px;height:7px;border-radius:50%;background:#2a2a2a;flex-shrink:0}
-.wcard.has-layers .wdot{background:#00ff88;box-shadow:0 0 6px #00ff8877}
-.wcard.dead .wdot{background:#ff3f3f}
-.wid{font-size:11px;font-weight:700;letter-spacing:0.5px}
-.wurl{font-size:9px;color:#3a3a3a;margin-left:auto}
-.wrange{font-size:10px;color:#888;margin-top:2px}
-.wlayerbar{height:5px;background:#111;border-radius:3px;margin-top:6px;position:relative;overflow:hidden}
-.wlayerbar-inner{position:absolute;top:0;bottom:0;background:#00ff88;border-radius:3px;transition:all .4s}
-.wcard.dead .wlayerbar-inner{background:#ff3f3f}
-.wfail{margin-top:8px;display:flex;gap:4px}
-.wfail button{flex:1;background:transparent;border:1px solid #202020;color:#666;padding:3px 0;border-radius:4px;font-family:inherit;font-size:9px;cursor:pointer;letter-spacing:1px}
-.wfail button:hover{border-color:#ff3f3f66;color:#ff6666}
-.wfail button.heal{color:#666}
-.wfail button.heal:hover{border-color:#00ff8866;color:#00ff88}
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); margin-left: auto; transition: background .25s; }
+  .conn-dot.live { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: breathe 3s ease-in-out infinite; }
 
-/* layer strip — all N layers laid out horizontally, colored by owning worker */
-#layerstrip{display:flex;width:100%;height:28px;border-radius:5px;overflow:hidden;border:1px solid #1a1a1a;margin-top:4px}
-.layercell{flex:1;position:relative}
-.layercell:not(:last-child){border-right:1px solid #0a0a0a}
-.layercell.unowned{background:#151515}
+  /* ───── Main 3-column layout ─────────────────────────────────────────── */
+  .main { display: flex; flex: 1; overflow: hidden; min-height: 0; }
 
-/* BMC HA panel — replica cards */
-#ha-section{display:none}
-#ha-section.on{display:block}
-.replicas{display:flex;flex-direction:column;gap:5px}
-.rcard{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:6px;padding:6px 8px;display:flex;align-items:center;gap:6px;transition:all .3s;position:relative}
-.rcard.leader{border-color:#00ff8866;background:#05130a;box-shadow:0 0 8px #00ff8822}
-.rcard.dead{opacity:.3;border-color:#ff3f3f44}
-.rcard.flash{animation:flash-leader 1.2s ease-out}
-@keyframes flash-leader{0%{box-shadow:0 0 0px #00ff88ff}50%{box-shadow:0 0 18px #00ff88ff}100%{box-shadow:0 0 8px #00ff8822}}
-.rdot{width:6px;height:6px;border-radius:50%;background:#2a2a2a}
-.rcard.leader .rdot{background:#00ff88;box-shadow:0 0 5px #00ff88}
-.rcard.dead .rdot{background:#ff3f3f}
-.rid{font-size:10px;font-weight:700;letter-spacing:0.5px}
-.rleader-tag{font-size:8px;color:#00ff88;background:#00ff8822;padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:4px}
-.rep-chaos{margin-left:auto;display:flex;gap:3px}
-.rep-chaos button{background:transparent;border:1px solid #222;color:#666;padding:1px 6px;border-radius:3px;font-family:inherit;font-size:8px;cursor:pointer;letter-spacing:0.5px}
-.rep-chaos button:hover{border-color:#ff3f3f66;color:#ff6666}
-.rep-chaos button.revive:hover{border-color:#00ff8866;color:#00ff88}
-.ha-legend{font-size:8px;color:#333;letter-spacing:1px;margin-top:6px;line-height:1.5}
+  /* Left: chats sidebar */
+  .sidebar {
+    width: 240px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    border-right: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .sidebar-header {
+    padding: 14px 14px 10px;
+    display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .sb-title { font-family: var(--mono); font-size: 9px; color: var(--text-subtle); letter-spacing: 2px; text-transform: uppercase; }
+  .btn-new {
+    margin-left: auto;
+    background: var(--accent); color: #000; border: none;
+    border-radius: 6px; padding: 5px 10px;
+    font-family: var(--mono); font-weight: 700; font-size: 11px;
+    cursor: pointer; transition: opacity .15s, transform .05s;
+    letter-spacing: 0.3px;
+  }
+  .btn-new:hover { opacity: 0.9; }
+  .btn-new:active { transform: translateY(1px); }
 
-/* BMC event log */
-#bmclog{max-height:190px;overflow-y:auto;font-size:10px;line-height:1.5}
-#bmclog::-webkit-scrollbar{width:3px}
-#bmclog::-webkit-scrollbar-thumb{background:#222}
-.evt{padding:2px 0;display:flex;gap:6px}
-.evt .arrow{color:#444;flex-shrink:0}
-.evt .arrow.to-bmc{color:#4A90D9}
-.evt .arrow.from-bmc{color:#00ff88}
-.evt .line{color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.evt .line.ack{color:#444}
-.evt .line.dead,.evt .line.fail{color:#ff6666}
-.evt .line.alive{color:#00ff88}
-.evt .line.partition{color:#ffaa00}
-.evt .line.leader{color:#00ff88;font-weight:700}
-.evt .arrow.meta{color:#00ff88}
+  .chat-list { flex: 1; overflow-y: auto; padding: 6px; }
+  .chat-list::-webkit-scrollbar { width: 4px; }
+  .chat-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 2px; }
+  .chat-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 10px; margin: 2px 0;
+    border-radius: 7px; cursor: pointer;
+    transition: background .12s;
+    position: relative;
+  }
+  .chat-row:hover { background: var(--bg-2); }
+  .chat-row.active { background: var(--bg-3); }
+  .chat-row.active::before {
+    content: ''; position: absolute; left: 0; top: 8px; bottom: 8px;
+    width: 2px; background: var(--accent); border-radius: 1px;
+  }
+  .chat-title {
+    flex: 1; font-size: 12.5px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-weight: 500;
+  }
+  .chat-row.active .chat-title { color: var(--accent); }
+  .chat-meta { font-family: var(--mono); font-size: 9px; color: var(--text-subtle); letter-spacing: 0.5px; }
+  .chat-del {
+    display: none; background: transparent; border: 0; color: var(--text-subtle);
+    padding: 2px 6px; cursor: pointer; border-radius: 4px; font-size: 14px;
+    line-height: 1;
+  }
+  .chat-row:hover .chat-del { display: inline-block; }
+  .chat-del:hover { color: var(--err); background: rgba(255,93,93,0.08); }
 
-/* RIGHT: chat */
-#chat{flex:1;display:flex;flex-direction:column;overflow:hidden}
-#msgs{flex:1;overflow-y:auto;padding:24px 28px}
-#msgs::-webkit-scrollbar{width:4px}
-#msgs::-webkit-scrollbar-thumb{background:#181818}
-.qblock{margin-bottom:28px}
-.user-msg{display:flex;justify-content:flex-end;margin-bottom:10px}
-.user-bubble{background:#0a1622;border:1px solid #1a3252;border-radius:12px 12px 2px 12px;padding:10px 14px;max-width:70%;color:#d0d0d0;line-height:1.5}
-.asst{background:#0a0a0a;border:1px solid #181818;border-radius:10px;padding:14px 16px;color:#bbb;line-height:1.65;white-space:pre-wrap;word-break:break-word;position:relative}
-.asst.aborted{border-color:#ff3f3f55;background:#160505}
-.asst-meta{font-size:9px;color:#3a3a3a;letter-spacing:1px;margin-bottom:8px;text-transform:uppercase}
-.asst-meta .tok{color:#00ff88}
-.asst-body{margin-top:4px}
-.asst-abort{margin-top:10px;padding:8px 10px;background:#1a0606;border:1px solid #ff3f3f33;border-radius:6px;color:#ff9090;font-size:11px}
-.stage-bar{display:flex;height:18px;border-radius:4px;overflow:hidden;margin-bottom:10px;border:1px solid #181818}
-.stage-seg{display:flex;align-items:center;justify-content:center;color:rgba(0,0,0,0.85);font-size:9px;font-weight:700;letter-spacing:0.5px;overflow:hidden;white-space:nowrap;transition:flex .4s}
-.stage-seg span{padding:0 6px;text-shadow:0 1px 0 rgba(255,255,255,0.4)}
+  /* Center: chat pane */
+  .chatpane {
+    flex: 1; display: flex; flex-direction: column;
+    min-width: 0; overflow: hidden;
+    background: var(--bg);
+  }
+  .chatpane-header {
+    padding: 10px 20px 10px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0;
+  }
+  .chat-h-title { font-family: var(--mono); font-size: 11px; color: var(--text); font-weight: 500; letter-spacing: 0.5px;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+  .chat-h-model { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--text-subtle); letter-spacing: 1px; }
 
-#empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;pointer-events:none}
-#empty .icon{font-size:44px;opacity:.1}
-#empty .txt{font-size:11px;color:#252525;letter-spacing:2px}
+  .msgs { flex: 1; overflow-y: auto; padding: 28px 32px 12px; scroll-behavior: smooth; }
+  .msgs::-webkit-scrollbar { width: 4px; }
+  .msgs::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 2px; }
 
-/* input bar */
-#ibar{display:flex;gap:8px;padding:14px 18px;border-top:1px solid #141414;flex-shrink:0;background:#060606}
-#qin{flex:1;background:#0a0a0a;border:1px solid #222;border-radius:8px;color:#fff;padding:10px 14px;font-family:inherit;font-size:13px;outline:none;transition:border-color .2s;height:42px}
-#qin:focus{border-color:#00ff8855}
-#qin::placeholder{color:#222}
-#sbtn{background:#00ff88;border:none;border-radius:8px;color:#000;padding:10px 22px;font-family:inherit;font-weight:800;cursor:pointer;transition:opacity .2s;letter-spacing:.5px;height:42px}
-#sbtn:disabled{opacity:.2;cursor:default}
-#sbtn:hover:not(:disabled){opacity:.85}
+  .empty-state {
+    height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; pointer-events: none;
+  }
+  .empty-icon {
+    font-size: 42px; opacity: 0.15;
+    font-family: var(--mono); letter-spacing: 8px; color: var(--accent);
+  }
+  .empty-text { font-family: var(--mono); font-size: 11px; letter-spacing: 2px; color: var(--text-faint); text-transform: uppercase; }
+  .empty-hint { font-size: 12px; color: var(--text-subtle); max-width: 340px; text-align: center; line-height: 1.6; }
 
-/* connection dot */
-#conn{width:8px;height:8px;border-radius:50%;background:#1e1e1e;transition:background .3s}
-#conn.live{background:#00ff88;box-shadow:0 0 6px #00ff8866}
+  .turn { margin-bottom: 28px; animation: fade-in .28s ease-out; }
+  @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .msg-user {
+    display: flex; justify-content: flex-end; margin-bottom: 14px;
+  }
+  .bubble-user {
+    background: var(--user-alpha);
+    border: 1px solid rgba(110,168,254,0.25);
+    color: var(--text);
+    padding: 11px 15px;
+    border-radius: 14px 14px 4px 14px;
+    max-width: 70%;
+    line-height: 1.55;
+    font-size: 13.5px;
+    word-wrap: break-word;
+  }
+
+  .msg-asst { display: flex; flex-direction: column; gap: 10px; }
+  .asst-header {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 10px;
+    color: var(--text-subtle); letter-spacing: 1.2px;
+    text-transform: uppercase;
+  }
+  .asst-header .label { color: var(--accent); font-weight: 700; }
+  .asst-header .sep { color: var(--text-faint); }
+  .asst-header .tag {
+    padding: 1px 8px; border-radius: 4px;
+    background: var(--bg-2); color: var(--text-dim);
+    font-size: 9px; letter-spacing: 1.3px;
+  }
+  .asst-header .tag.live { color: var(--accent); background: var(--accent-alpha); }
+  .asst-header .tag.live::after { content: '●'; margin-left: 5px; animation: breathe 1.2s ease-in-out infinite; }
+
+  .answer-box {
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    line-height: 1.6;
+    font-size: 15px;
+    font-weight: 500;
+    color: #ffffff;
+    white-space: pre-wrap;
+    word-break: break-word;
+    position: relative;
+  }
+  .answer-box.streaming { border-color: rgba(0,255,136,0.25); }
+  .answer-box.streaming::after {
+    content: ''; display: inline-block; width: 6px; height: 14px;
+    background: var(--accent);
+    margin-left: 2px; vertical-align: text-bottom;
+    animation: caret 1s steps(2) infinite;
+  }
+  @keyframes caret { 50% { opacity: 0; } }
+
+  /* Markdown styling inside the answer block. */
+  .answer-box p { margin: 0 0 10px 0; }
+  .answer-box p:last-child { margin-bottom: 0; }
+  .answer-box h1, .answer-box h2, .answer-box h3,
+  .answer-box h4, .answer-box h5, .answer-box h6 {
+    margin: 14px 0 6px 0; font-weight: 700; color: #ffffff;
+    letter-spacing: 0.3px;
+  }
+  .answer-box h1 { font-size: 20px; }
+  .answer-box h2 { font-size: 17px; }
+  .answer-box h3 { font-size: 15px; }
+  .answer-box h4, .answer-box h5, .answer-box h6 { font-size: 14px; color: var(--text-dim); }
+  .answer-box h1:first-child, .answer-box h2:first-child, .answer-box h3:first-child { margin-top: 0; }
+  .answer-box strong { font-weight: 700; color: #ffffff; }
+  .answer-box em { font-style: italic; }
+  .answer-box ul, .answer-box ol { margin: 6px 0 10px 0; padding-left: 22px; }
+  .answer-box li { margin: 3px 0; }
+  .answer-box a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .answer-box a:hover { opacity: 0.85; }
+  .answer-box code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    padding: 1px 5px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+  }
+  .answer-box pre {
+    margin: 8px 0;
+    padding: 10px 12px;
+    background: #060606;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+  .answer-box pre code {
+    background: transparent; border: none; padding: 0;
+    font-size: 12.5px; line-height: 1.5;
+  }
+  .answer-box.aborted {
+    border-color: rgba(255,93,93,0.3);
+    background: rgba(255,93,93,0.05);
+  }
+  .abort-note { margin-top: 10px; color: var(--err); font-size: 11.5px; font-family: var(--mono); }
+
+  .raw-expand {
+    margin-top: 2px; display: flex; align-items: center; gap: 6px;
+    color: var(--text-subtle); font-family: var(--mono); font-size: 10px;
+    cursor: pointer; user-select: none; letter-spacing: 0.8px;
+    padding: 4px 0; width: fit-content;
+  }
+  .raw-expand:hover { color: var(--text-dim); }
+  .raw-expand .arrow { transition: transform .2s; }
+  .raw-expand.open .arrow { transform: rotate(90deg); }
+  .raw-panel {
+    display: none;
+    margin-top: 8px;
+    background: #060606;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--mono); font-size: 11.5px;
+    color: var(--text-dim); line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .raw-expand.open + .raw-panel { display: block; }
+
+  /* Per-stage latency bar */
+  .stage-bar {
+    display: flex; gap: 2px; height: 6px;
+    border-radius: 3px; overflow: hidden;
+    background: var(--bg-2);
+  }
+  .stage-bar .seg { transition: flex .4s; }
+  .stage-legend {
+    display: flex; gap: 12px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 9.5px; color: var(--text-subtle);
+    letter-spacing: 0.5px;
+  }
+  .stage-legend .leg { display: flex; align-items: center; gap: 5px; }
+  .stage-legend .leg .dot { width: 7px; height: 7px; border-radius: 2px; }
+  .stage-legend .leg .v { color: var(--text-dim); }
+
+  /* Input bar */
+  .inputbar {
+    padding: 14px 22px 18px;
+    border-top: 1px solid var(--line);
+    display: flex; gap: 10px; align-items: flex-end;
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+  .input-wrapper {
+    flex: 1; position: relative;
+    background: var(--bg-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    transition: border-color .18s, background .18s;
+  }
+  .input-wrapper:focus-within {
+    border-color: rgba(0,255,136,0.4);
+    background: var(--bg-1);
+  }
+  .input-wrapper textarea {
+    width: 100%; border: 0; outline: 0;
+    background: transparent; color: var(--text);
+    font-family: var(--sans); font-size: 14px;
+    padding: 13px 16px; resize: none;
+    line-height: 1.5; min-height: 46px; max-height: 200px;
+  }
+  .input-wrapper textarea::placeholder { color: var(--text-subtle); }
+  .btn-send {
+    background: var(--accent); color: #000;
+    border: 0; border-radius: 10px;
+    padding: 0 22px; height: 46px;
+    font-family: var(--mono); font-weight: 800; font-size: 12px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: opacity .15s, transform .05s;
+  }
+  .btn-send:hover:not(:disabled) { opacity: 0.92; }
+  .btn-send:active:not(:disabled) { transform: translateY(1px); }
+  .btn-send:disabled { background: var(--line-strong); color: var(--text-subtle); cursor: not-allowed; }
+
+  .busy-spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid var(--bg-3); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite;
+    margin-right: 6px; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Right: monitor panel */
+  .monitor {
+    width: 340px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    border-left: 1px solid var(--line);
+    background: #080808;
+    overflow-y: auto;
+  }
+  .monitor::-webkit-scrollbar { width: 4px; }
+  .monitor::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 2px; }
+  .mon-section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .mon-section:last-child { border-bottom: 0; }
+  .mon-title {
+    font-family: var(--mono); font-size: 9px; color: var(--text-subtle);
+    letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px;
+  }
+
+  /* Layer strip */
+  .layer-strip {
+    display: flex; width: 100%; height: 22px;
+    border-radius: 4px; overflow: hidden;
+    background: var(--bg-2); border: 1px solid var(--line);
+  }
+  .layer-cell { flex: 1; height: 100%; position: relative; transition: filter .15s; }
+  .layer-cell.active-pulse { animation: pulse-cell .6s ease-out; }
+  @keyframes pulse-cell {
+    0% { filter: brightness(1.8); }
+    100% { filter: brightness(1); }
+  }
+
+  /* Worker cards */
+  .w-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .w-card {
+    background: var(--bg-1); border: 1px solid var(--line);
+    border-radius: 8px; padding: 11px 12px;
+    transition: border-color .2s;
+  }
+  .w-card.has-layers { border-color: rgba(0,255,136,0.2); }
+  .w-card.dead { opacity: 0.4; border-color: rgba(255,93,93,0.3); }
+  .w-card-head { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+  .w-card-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+  .w-card.has-layers .w-card-dot { box-shadow: 0 0 6px currentColor; }
+  .w-card-name { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.5px; }
+  .w-card-addr { font-family: var(--mono); font-size: 9px; color: var(--text-subtle); margin-left: auto; }
+  .w-card-range { font-family: var(--mono); font-size: 10px; color: var(--text-dim); margin-bottom: 6px; letter-spacing: 0.3px; }
+  .w-card-bar { height: 3px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
+  .w-card-bar .fill { height: 100%; transition: width .5s; }
+  .w-card-btns { display: flex; gap: 5px; margin-top: 8px; }
+  .w-card-btns button {
+    flex: 1; padding: 3px 0; border-radius: 4px; cursor: pointer;
+    background: transparent; border: 1px solid var(--line-strong);
+    font-family: var(--mono); font-size: 9px; color: var(--text-subtle);
+    letter-spacing: 1px; transition: all .12s;
+  }
+  .w-card-btns button:hover { color: var(--err); border-color: rgba(255,93,93,0.35); }
+  .w-card-btns .heal:hover { color: var(--accent); border-color: rgba(0,255,136,0.35); }
+
+  /* BMC event log */
+  .evt-log { max-height: 200px; overflow-y: auto; font-family: var(--mono); font-size: 10px; line-height: 1.5; }
+  .evt-log::-webkit-scrollbar { width: 3px; }
+  .evt-log::-webkit-scrollbar-thumb { background: var(--line-strong); }
+  .evt { display: flex; gap: 6px; padding: 1px 0; }
+  .evt .arr { color: var(--text-faint); flex-shrink: 0; }
+  .evt .arr.out { color: var(--user); }
+  .evt .arr.in { color: var(--accent); }
+  .evt .ln { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .evt .ln.ack { color: var(--text-faint); }
+  .evt .ln.dead, .evt .ln.fail { color: var(--err); }
+  .evt .ln.alive { color: var(--accent); }
+  .evt .ln.partition { color: var(--arduino); }
+  .evt .ln.leader { color: var(--accent); font-weight: 600; }
+
+  /* QR panel */
+  .qr-row { display: flex; gap: 12px; align-items: flex-start; }
+  .qr-box { background: #fff; padding: 5px; border-radius: 5px; flex-shrink: 0; }
+  .qr-box img, .qr-box canvas { display: block; width: 88px; height: 88px; }
+  .qr-body { flex: 1; min-width: 0; }
+  .qr-url {
+    font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 500;
+    word-break: break-all; line-height: 1.4; cursor: pointer;
+  }
+  .qr-hint { font-family: var(--mono); font-size: 9px; color: var(--text-subtle); letter-spacing: 0.5px; margin-top: 4px; }
+
+  /* BMC HA replicas */
+  .replicas { display: flex; flex-direction: column; gap: 4px; }
+  .rep {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; border-radius: 5px;
+    background: var(--bg-1); border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 10px;
+  }
+  .rep.leader { border-color: rgba(0,255,136,0.35); background: var(--accent-alpha); }
+  .rep.dead { opacity: 0.35; }
+  .rep-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-faint); }
+  .rep.leader .rep-dot { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
+  .rep.dead .rep-dot { background: var(--err); }
+  .rep-name { font-weight: 700; letter-spacing: 0.5px; }
+  .rep-tag { margin-left: auto; padding: 1px 6px; border-radius: 3px; font-size: 8px; letter-spacing: 1.2px;
+             background: var(--accent-alpha); color: var(--accent); font-weight: 700; }
+
+  @media (max-width: 900px) {
+    .monitor { width: 260px; }
+    .sidebar { width: 180px; }
+  }
 </style>
 </head>
 <body>
 
-<div id="hdr">
-  <h1>REVIVE</h1>
-  <div class="hsep"></div>
-  <div class="stat"><span class="stat-l">MODEL</span><span class="stat-v" id="model">—</span></div>
-  <div class="stat"><span class="stat-l">LAYERS</span><span class="stat-v" id="layers">0</span></div>
-  <div class="stat"><span class="stat-l">WORKERS</span><span class="stat-v" id="workers-count">0</span></div>
-  <div class="stat"><span class="stat-l">TOKENS</span><span class="stat-v" id="total-tokens">0</span></div>
-  <div class="stat"><span class="stat-l">TOK/S</span><span class="stat-v" id="tps">0.0</span></div>
-  <div id="bmc-src" title="BMC source"></div>
-  <div id="state-pill" class="state-disconnected">DISCONNECTED</div>
-  <div id="conn"></div>
+<!-- ───── Top bar ─────────────────────────────────────────────────────── -->
+<div class="topbar">
+  <span class="logo">REVIVE</span>
+  <span class="divider"></span>
+  <div class="stat-chip"><span class="k">nodes</span><span class="v" id="stat-nodes">0</span></div>
+  <div class="stat-chip"><span class="k">layers</span><span class="v" id="stat-layers">0</span></div>
+  <div class="stat-chip"><span class="k">tokens</span><span class="v" id="stat-tokens">0</span></div>
+  <div class="stat-chip"><span class="k">tok/s</span><span class="v" id="stat-tps">0.0</span></div>
+  <div style="flex:1"></div>
+  <div class="bmc-badge" id="bmc-badge"><span class="dot"></span><span id="bmc-src">—</span></div>
+  <div class="pill disconnected" id="state-pill">DISCONNECTED</div>
+  <div class="conn-dot" id="conn"></div>
 </div>
 
-<div id="body">
-  <div id="side">
-    <div class="sect">
-      <div class="sect-h">CLUSTER TOPOLOGY</div>
-      <div id="layerstrip"></div>
-      <div id="topology" style="margin-top:12px"></div>
+<!-- ───── Main layout ─────────────────────────────────────────────────── -->
+<div class="main">
+
+  <!-- Left sidebar: chats -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span class="sb-title">Chats</span>
+      <button class="btn-new" onclick="newChat()">+ NEW</button>
     </div>
-    <div class="sect" id="ha-section">
-      <div class="sect-h">BMC REPLICAS (HA)</div>
-      <div class="replicas" id="replicas"></div>
-      <div class="ha-legend">one elected leader; unplug it to fail over</div>
+    <div class="chat-list" id="chats"></div>
+  </div>
+
+  <!-- Center: chat pane -->
+  <div class="chatpane">
+    <div class="chatpane-header">
+      <span class="chat-h-title" id="chat-h-title">—</span>
+      <span class="chat-h-model" id="chat-h-model">—</span>
     </div>
-    <div class="sect" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
-      <div class="sect-h">BMC EVENT LOG</div>
-      <div id="bmclog"></div>
+
+    <div class="msgs" id="msgs">
+      <!-- populated by render() -->
+    </div>
+
+    <div class="inputbar">
+      <div class="input-wrapper">
+        <textarea id="qin" rows="1" placeholder="Ask the cluster…"
+                  oninput="autosize(this)"
+                  onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();send()}"></textarea>
+      </div>
+      <button class="btn-send" id="sbtn" onclick="send()">SEND</button>
     </div>
   </div>
 
-  <div id="chat">
-    <div id="msgs">
-      <div id="empty">
-        <div class="icon">⚡</div>
-        <div class="txt">ASK THE CLUSTER ANYTHING</div>
+  <!-- Right: system monitor -->
+  <div class="monitor">
+
+    <div class="mon-section">
+      <div class="mon-title">Layer Partition</div>
+      <div class="layer-strip" id="layer-strip"></div>
+      <div class="stage-legend" id="layer-legend" style="margin-top:8px"></div>
+    </div>
+
+    <div class="mon-section">
+      <div class="mon-title">Compute Nodes</div>
+      <div class="w-cards" id="workers"></div>
+    </div>
+
+    <div class="mon-section" id="ha-sect" style="display:none">
+      <div class="mon-title">BMC Replicas (HA)</div>
+      <div class="replicas" id="replicas"></div>
+    </div>
+
+    <div class="mon-section">
+      <div class="mon-title">BMC Wire (Arduino ↔ Host)</div>
+      <div class="evt-log" id="evt-log"></div>
+    </div>
+
+    <div class="mon-section">
+      <div class="mon-title">Connect a Device</div>
+      <div class="qr-row">
+        <div class="qr-box" id="qr"></div>
+        <div class="qr-body">
+          <div class="qr-url" id="conn-url" onclick="copyUrl()">—</div>
+          <div class="qr-hint">scan on any phone/iPad on the same LAN</div>
+          <div class="qr-hint" id="copy-toast" style="color:var(--accent); margin-top:6px; opacity:0; transition:opacity .2s"></div>
+        </div>
       </div>
     </div>
-    <div id="ibar">
-      <input id="qin" placeholder="Ask the cluster…"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();send()}"/>
-      <button id="sbtn" onclick="send()">Send</button>
-    </div>
+
   </div>
+
 </div>
 
 <script>
-const WORKER_COLORS = ['#00ff88','#4A90D9','#F5A623','#9B59B6','#E74C3C','#2ECC71'];
+// ─── config / state ──────────────────────────────────────────────────────
+const WORKER_COLORS = ['#00ff88','#6ea8fe','#f5a623','#c17bff','#ff8080','#2ecc71','#ffd66b','#8bd9a8'];
 let state = null;
-let renderedQids = new Set();
-let lastLeader = null;  // track leader changes for the flash animation
+let qrUrl = null;
 
+// innerHTML assignment tears down child DOM and triggers paint even when the
+// output string is identical. At 30 broadcasts/sec during streaming that's
+// what caused the chat pane to shutter black. Memoize per element.
+function setHTMLIfChanged(el, html) {
+  if (el._lastHtml === html) return;
+  el._lastHtml = html;
+  el.innerHTML = html;
+}
+
+// Minimal markdown renderer for LLM output. Escapes HTML first, then applies
+// a safe subset: headers, bold, italic, inline/block code, ordered+unordered
+// lists, autolinks. Single-paragraph content stays inline so the streaming
+// caret sits right after the last character rather than dropping to a new line.
+function renderMarkdown(raw) {
+  if (!raw) return '';
+  let s = String(raw).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Fenced code blocks first so their contents aren't mangled by later rules.
+  s = s.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g,
+    (_, _lang, code) => `<pre><code>${code.replace(/\n$/, '')}</code></pre>`);
+
+  // Headers (line start)
+  s = s.replace(/^###### (.+)$/gm, '<h6>$1</h6>')
+       .replace(/^##### (.+)$/gm, '<h5>$1</h5>')
+       .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+       .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+       .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+       .replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // Inline code
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+
+  // Bold, then italic. Non-greedy and no-newline so unclosed markers during
+  // streaming fall through as literal text instead of swallowing the rest.
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+       .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+       .replace(/(^|[\s(])_([^_\n]+)_/g, '$1<em>$2</em>');
+
+  // Markdown links — only http(s) allowed, opens in new tab.
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  // Unordered lists
+  s = s.replace(/(^(?:[-*] .+\n?)+)/gm, block => {
+    const items = block.trim().split('\n')
+      .map(l => `<li>${l.replace(/^[-*] /, '')}</li>`).join('');
+    return `<ul>${items}</ul>`;
+  });
+  // Ordered lists
+  s = s.replace(/(^(?:\d+\. .+\n?)+)/gm, block => {
+    const items = block.trim().split('\n')
+      .map(l => `<li>${l.replace(/^\d+\. /, '')}</li>`).join('');
+    return `<ol>${items}</ol>`;
+  });
+
+  // Paragraphs. Single-paragraph output stays unwrapped so the streaming
+  // caret sits inline at the end of the text.
+  const blocks = s.split(/\n\n+/).map(b => b.trim()).filter(Boolean);
+  const isBlock = t => /^<(h[1-6]|ul|ol|pre|blockquote)/i.test(t);
+  if (blocks.length === 1 && !isBlock(blocks[0])) {
+    s = blocks[0].replace(/\n/g, '<br>');
+  } else {
+    s = blocks.map(t => isBlock(t) ? t : `<p>${t.replace(/\n/g, '<br>')}</p>`).join('');
+  }
+  return s;
+}
+let lastLeader = null;
+let layerCells = [];         // DOM refs for pulse animation
+
+// ─── SSE ─────────────────────────────────────────────────────────────────
 function connect() {
   const es = new EventSource('/events');
-  const conn = document.getElementById('conn');
-  es.onopen = () => { conn.className = 'live'; renderedQids = new Set(); };
-  es.onerror = () => { conn.className = ''; setTimeout(connect, 2000); };
-  es.onmessage = e => { state = JSON.parse(e.data); render(); };
+  const dot = document.getElementById('conn');
+  es.onopen = () => { dot.classList.add('live'); lastLeader = null; };
+  es.onerror = () => { dot.classList.remove('live'); setTimeout(connect, 2000); };
+  es.onmessage = e => {
+    state = JSON.parse(e.data);
+    render();
+  };
 }
 connect();
 
-function workerColor(wid, workers) {
-  const idx = workers.findIndex(w => w.id === wid);
-  return WORKER_COLORS[idx % WORKER_COLORS.length] || '#00ff88';
+// ─── color helper ────────────────────────────────────────────────────────
+function colorFor(workerId, workers) {
+  const i = workers.findIndex(w => w.id === workerId);
+  return WORKER_COLORS[i % WORKER_COLORS.length] || '#00ff88';
 }
 
+// ─── render ──────────────────────────────────────────────────────────────
 function render() {
   if (!state) return;
 
-  // Header
-  document.getElementById('model').textContent = (state.model || '—').split('/').pop();
-  document.getElementById('layers').textContent = state.num_layers || 0;
-  document.getElementById('workers-count').textContent = state.workers.length;
-  document.getElementById('total-tokens').textContent = fmt(state.total_tokens);
-  document.getElementById('tps').textContent = state.collective_tps.toFixed(1);
+  renderTopbar();
+  renderChats();
+  renderMessages();
+  renderMonitor();
+  renderQR();
+  renderHA();
+}
 
-  // BMC state pill
+function renderTopbar() {
+  document.getElementById('stat-nodes').textContent = state.workers.length;
+  document.getElementById('stat-layers').textContent = state.num_layers || 0;
+  document.getElementById('stat-tokens').textContent = fmtInt(state.total_tokens);
+  document.getElementById('stat-tps').textContent = (state.collective_tps || 0).toFixed(1);
+
   const pill = document.getElementById('state-pill');
-  pill.textContent = (state.bmc.state || 'disconnected').toUpperCase();
-  pill.className = 'state-' + (state.bmc.state || 'disconnected');
+  const s = state.bmc?.state || 'disconnected';
+  pill.textContent = s.toUpperCase();
+  pill.className = 'pill ' + s;
 
-  // BMC source badge — "ARDUINO" in amber when physical, "SIM" otherwise
-  const src = document.getElementById('bmc-src');
-  const source = state.bmc_source || '';
-  if (source.startsWith('arduino:')) {
-    src.textContent = 'BMC: ARDUINO ' + source.replace('arduino:', '').split('/').pop();
-    src.className = 'arduino';
-  } else if (source.startsWith('simulator:')) {
-    src.textContent = 'BMC: SIMULATOR';
-    src.className = 'sim';
+  const bmcSrc = state.bmc_source || '';
+  const badge = document.getElementById('bmc-badge');
+  const label = document.getElementById('bmc-src');
+  if (bmcSrc.startsWith('arduino:')) {
+    badge.classList.add('arduino');
+    label.textContent = 'ARDUINO ' + bmcSrc.split('/').pop();
+  } else if (bmcSrc.startsWith('simulator')) {
+    badge.classList.remove('arduino');
+    label.textContent = 'SIMULATOR';
   } else {
-    src.textContent = '';
-    src.className = '';
+    badge.classList.remove('arduino');
+    label.textContent = bmcSrc || '—';
   }
 
-  // Layer strip — colored bars showing which worker owns each layer
-  const strip = document.getElementById('layerstrip');
-  const L = state.num_layers || 0;
-  const partition = state.bmc.partition;
-  if (L > 0) {
-    let html = '';
-    for (let i = 0; i < L; i++) {
-      const owner = partition.find(p => i >= p[1] && i < p[2]);
-      if (owner) {
-        const color = workerColor(owner[0], state.workers);
-        html += `<div class="layercell" style="background:${color}aa" title="layer ${i}: ${owner[0]}"></div>`;
-      } else {
-        html += `<div class="layercell unowned" title="layer ${i}: unassigned"></div>`;
-      }
+  // Chat header
+  const active = activeChat();
+  document.getElementById('chat-h-title').textContent = active ? active.title : '—';
+  document.getElementById('chat-h-model').textContent = (state.model || '').split('/').pop();
+}
+
+function renderChats() {
+  const el = document.getElementById('chats');
+  const active = state.active_chat_id;
+  const html = (state.chats || []).map(c => {
+    const isActive = c.id === active;
+    return `<div class="chat-row ${isActive?'active':''}" onclick="activateChat('${c.id}')">
+      <div style="flex:1; overflow:hidden">
+        <div class="chat-title">${esc(c.title)}</div>
+        <div class="chat-meta">${c.message_count} msg · ${relTime(c.updated_at)}</div>
+      </div>
+      <button class="chat-del" title="Delete"
+              onclick="event.stopPropagation(); deleteChat('${c.id}')">✕</button>
+    </div>`;
+  }).join('');
+  setHTMLIfChanged(el, html);
+}
+
+function activeChat() {
+  if (!state) return null;
+  return (state.chats || []).find(c => c.id === state.active_chat_id) || null;
+}
+
+// Incremental rendering — we never blow away the whole message list on
+// each SSE tick. The full-innerHTML approach was causing a visible flicker
+// every ~33ms as tokens streamed. Instead we keep a DOM registry per qid
+// and only write the parts that actually changed.
+const turnNodes = {};   // qid → { root, userBubble, asstWrap, header, stageBar, legend, body, abort, rawExpand, rawPanel }
+let lastChatId = null;
+let lastEmptyShown = false;
+
+function renderMessages() {
+  const el = document.getElementById('msgs');
+  const msgs = state.messages || [];
+
+  // Chat switched — wipe and re-seed
+  if (state.active_chat_id !== lastChatId) {
+    el.innerHTML = '';
+    for (const k of Object.keys(turnNodes)) delete turnNodes[k];
+    lastChatId = state.active_chat_id;
+    lastEmptyShown = false;
+  }
+
+  if (msgs.length === 0) {
+    if (!lastEmptyShown) {
+      el.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">◆ ◆ ◆</div>
+          <div class="empty-text">Ready</div>
+          <div class="empty-hint">
+            Ask anything. Inference splits across ${state.workers.length} node${state.workers.length===1?'':'s'} —
+            hidden states flow through the ring, the final answer streams back here in real time.
+          </div>
+        </div>`;
+      lastEmptyShown = true;
     }
-    strip.innerHTML = html;
+    document.getElementById('sbtn').disabled = !!state.busy;
+    document.getElementById('sbtn').textContent = state.busy ? 'RUNNING' : 'SEND';
+    return;
+  }
+  if (lastEmptyShown) {
+    el.innerHTML = '';
+    lastEmptyShown = false;
   }
 
-  // Worker cards + chaos buttons
-  const topo = document.getElementById('topology');
-  topo.innerHTML = state.workers.map(w => {
-    const color = workerColor(w.id, state.workers);
+  // Group messages by qid, maintaining creation order
+  const qidOrder = [];
+  const turns = {};
+  for (const m of msgs) {
+    if (!turns[m.qid]) { turns[m.qid] = { user: null, asst: null }; qidOrder.push(m.qid); }
+    if (m.role === 'user') turns[m.qid].user = m;
+    else turns[m.qid].asst = m;
+  }
+
+  // Remove stale qids (e.g. from previous chats)
+  for (const qid of Object.keys(turnNodes)) {
+    if (!turns[qid]) {
+      turnNodes[qid].root.remove();
+      delete turnNodes[qid];
+    }
+  }
+
+  // Create or update each turn
+  for (const qid of qidOrder) {
+    const t = turns[qid];
+    let node = turnNodes[qid];
+    if (!node) {
+      node = createTurnNode(qid);
+      turnNodes[qid] = node;
+      el.appendChild(node.root);
+    }
+    updateTurnNode(node, t);
+  }
+
+  // Autoscroll only when near bottom (don't fight the user scrolling up)
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  if (nearBottom) el.scrollTop = el.scrollHeight;
+
+  document.getElementById('sbtn').disabled = !!state.busy;
+  document.getElementById('sbtn').textContent = state.busy ? 'RUNNING' : 'SEND';
+}
+
+function createTurnNode(qid) {
+  const root = document.createElement('div');
+  root.className = 'turn';
+  root.dataset.qid = qid;
+
+  const userWrap = document.createElement('div');
+  userWrap.className = 'msg-user';
+  userWrap.style.display = 'none';
+  const userBubble = document.createElement('div');
+  userBubble.className = 'bubble-user';
+  userWrap.appendChild(userBubble);
+
+  const asstWrap = document.createElement('div');
+  asstWrap.className = 'msg-asst';
+  asstWrap.style.display = 'none';
+
+  const header = document.createElement('div');
+  header.className = 'asst-header';
+
+  const stageBar = document.createElement('div');
+  stageBar.className = 'stage-bar';
+  stageBar.style.display = 'none';
+
+  const legend = document.createElement('div');
+  legend.className = 'stage-legend';
+  legend.style.marginTop = '6px';
+  legend.style.display = 'none';
+
+  const body = document.createElement('div');
+  body.className = 'answer-box';
+
+  const abort = document.createElement('div');
+  abort.className = 'abort-note';
+  abort.style.display = 'none';
+
+  const rawExpand = document.createElement('div');
+  rawExpand.className = 'raw-expand';
+  rawExpand.style.display = 'none';
+  rawExpand.innerHTML = '<span class="arrow">▶</span> show raw stream';
+  rawExpand.addEventListener('click', () => rawExpand.classList.toggle('open'));
+
+  const rawPanel = document.createElement('div');
+  rawPanel.className = 'raw-panel';
+
+  asstWrap.appendChild(header);
+  asstWrap.appendChild(stageBar);
+  asstWrap.appendChild(legend);
+  asstWrap.appendChild(body);
+  asstWrap.appendChild(abort);
+  asstWrap.appendChild(rawExpand);
+  asstWrap.appendChild(rawPanel);
+
+  root.appendChild(userWrap);
+  root.appendChild(asstWrap);
+
+  return { root, userWrap, userBubble, asstWrap, header, stageBar, legend, body, abort, rawExpand, rawPanel };
+}
+
+function updateTurnNode(n, t) {
+  // User bubble
+  if (t.user) {
+    n.userWrap.style.display = '';
+    if (n.userBubble.textContent !== t.user.content) {
+      n.userBubble.textContent = t.user.content;
+    }
+  } else {
+    n.userWrap.style.display = 'none';
+  }
+
+  // Assistant block
+  const a = t.asst;
+  if (!a) { n.asstWrap.style.display = 'none'; return; }
+  n.asstWrap.style.display = '';
+
+  const streaming = a.streaming === true;
+  const aborted = !!a.aborted;
+  const tokens = a.tokens || 0;
+  const tps = a.tps || 0;
+  const stepMs = a.step_latency_ms || 0;
+
+  // Header — only patch if changed
+  const headerKey = `${streaming}|${tokens}|${tps.toFixed(1)}|${Math.round(stepMs)}`;
+  if (n._headerKey !== headerKey) {
+    const parts = [`<span class="label">REVIVE</span>`];
+    if (tokens > 0) parts.push(`<span>${tokens} tok</span>`);
+    if (tps > 0) parts.push(`<span>${tps.toFixed(1)} tok/s</span>`);
+    if (stepMs > 0) parts.push(`<span>${Math.round(stepMs)}ms/step</span>`);
+    let h = parts.join(' <span class="sep">·</span> ');
+    if (streaming) h += ` <span class="tag live">STREAMING</span>`;
+    n.header.innerHTML = h;
+    n._headerKey = headerKey;
+  }
+
+  // Stage latency bar
+  const lats = a.avg_stage_latencies_ms || [];
+  const latKey = lats.map(v => v.toFixed(1)).join(',') + '|' + state.workers.length;
+  if (n._latKey !== latKey) {
+    if (lats.length > 0 && state.workers.length === lats.length) {
+      const total = lats.reduce((p, q) => p + q, 0) || 1;
+      let segs = '', legs = '';
+      lats.forEach((lat, i) => {
+        const w = state.workers[i];
+        const col = colorFor(w.id, state.workers);
+        segs += `<div class="seg" style="flex:${lat};background:${col}"></div>`;
+        legs += `<div class="leg"><span class="dot" style="background:${col}"></span>`
+             + `<span>${esc(w.id)}</span> <span class="v">${lat.toFixed(1)}ms</span></div>`;
+      });
+      n.stageBar.innerHTML = segs;
+      n.legend.innerHTML = legs;
+      n.stageBar.style.display = '';
+      n.legend.style.display = '';
+    } else {
+      n.stageBar.style.display = 'none';
+      n.legend.style.display = 'none';
+    }
+    n._latKey = latKey;
+  }
+
+  // Answer body — the hot path during streaming. Markdown-render only when
+  // content changes; textContent/innerHTML assignment is what makes the
+  // caret jump, so gate it behind a diff.
+  const content = a.content || '';
+  if (n._body !== content) {
+    n.body.innerHTML = renderMarkdown(content);
+    n._body = content;
+  }
+  const cls = ['answer-box'];
+  if (streaming) cls.push('streaming');
+  if (aborted) cls.push('aborted');
+  const clsStr = cls.join(' ');
+  if (n.body.className !== clsStr) n.body.className = clsStr;
+
+  // Abort note
+  if (aborted) {
+    n.abort.style.display = '';
+    const reason = a.abort_reason || 'aborted';
+    if (n._abortReason !== reason) {
+      n.abort.textContent = '⚠ ' + reason;
+      n._abortReason = reason;
+    }
+  } else {
+    n.abort.style.display = 'none';
+  }
+
+  // Raw-stream expand panel — only show when done and has content
+  const hasContent = content && content.trim().length > 0;
+  const showRaw = hasContent && !streaming;
+  if (n._showRaw !== showRaw) {
+    n.rawExpand.style.display = showRaw ? '' : 'none';
+    n.rawPanel.style.display = showRaw ? n.rawPanel.style.display : 'none';
+    n._showRaw = showRaw;
+  }
+  if (showRaw && n._rawBody !== content) {
+    n.rawPanel.textContent = content;
+    n._rawBody = content;
+  }
+}
+
+function renderMonitor() {
+  // Layer strip
+  const L = state.num_layers || 0;
+  const strip = document.getElementById('layer-strip');
+  const partition = state.bmc?.partition || [];
+
+  if (layerCells.length !== L) {
+    strip.innerHTML = '';
+    layerCells = [];
+    for (let i = 0; i < L; i++) {
+      const div = document.createElement('div');
+      div.className = 'layer-cell';
+      strip.appendChild(div);
+      layerCells.push(div);
+    }
+  }
+
+  for (let i = 0; i < L; i++) {
+    const owner = partition.find(p => i >= p[1] && i < p[2]);
+    if (owner) {
+      const col = colorFor(owner[0], state.workers);
+      const nextBg = col + 'cc';
+      if (layerCells[i]._bg !== nextBg) { layerCells[i].style.background = nextBg; layerCells[i]._bg = nextBg; }
+      layerCells[i].title = `layer ${i} · ${owner[0]}`;
+    } else {
+      if (layerCells[i]._bg !== '#161616') { layerCells[i].style.background = '#161616'; layerCells[i]._bg = '#161616'; }
+      layerCells[i].title = `layer ${i} · unassigned`;
+    }
+  }
+
+  // Layer legend
+  const leg = document.getElementById('layer-legend');
+  const legHtml = partition.map(p => {
+    const col = colorFor(p[0], state.workers);
+    return `<div class="leg"><span class="dot" style="background:${col}"></span>`
+         + `<span>${esc(p[0])}</span><span class="v">[${p[1]}..${p[2]})</span></div>`;
+  }).join('');
+  setHTMLIfChanged(leg, legHtml);
+
+  // Workers
+  const wHtml = state.workers.map(w => {
+    const col = colorFor(w.id, state.workers);
     const owned = partition.find(p => p[0] === w.id);
     const span = owned ? (owned[2] - owned[1]) : 0;
     const pct = L > 0 ? (span / L * 100) : 0;
-    const classes = ['wcard'];
-    if (w.dead) classes.push('dead');
-    if (span > 0) classes.push('has-layers');
-    return `<div class="${classes.join(' ')}">
-      <div class="row1">
-        <span class="wdot"></span>
-        <span class="wid" style="color:${color}">${esc(w.id.toUpperCase())}</span>
-        <span class="wurl">${esc(w.host)}:${w.port}</span>
+    const cls = ['w-card'];
+    if (span > 0) cls.push('has-layers');
+    if (w.dead) cls.push('dead');
+    return `<div class="${cls.join(' ')}">
+      <div class="w-card-head">
+        <span class="w-card-dot" style="background:${col};color:${col}"></span>
+        <span class="w-card-name" style="color:${col}">${esc(w.id.toUpperCase())}</span>
+        <span class="w-card-addr">${esc(w.host)}:${w.port}</span>
       </div>
-      <div class="wrange">
-        ${owned ? `layers [${owned[1]}..${owned[2]}) · ${span} of ${L}` : (w.dead ? '<span style="color:#ff6666">DEAD — no assignment</span>' : 'unassigned')}
+      <div class="w-card-range">
+        ${owned ? `layers [${owned[1]}..${owned[2]}) · ${span}/${L}` :
+                  (w.dead ? '<span style="color:var(--err)">DEAD</span>' : 'unassigned')}
       </div>
-      <div class="wlayerbar"><div class="wlayerbar-inner" style="width:${pct}%;background:${color}"></div></div>
-      <div class="wfail">
+      <div class="w-card-bar"><div class="fill" style="width:${pct}%;background:${col}"></div></div>
+      <div class="w-card-btns">
         <button onclick="chaos('fail','${w.id}')">KILL</button>
         <button class="heal" onclick="chaos('heal','${w.id}')">HEAL</button>
       </div>
     </div>`;
   }).join('');
+  setHTMLIfChanged(document.getElementById('workers'), wHtml);
 
-  // BMC HA panel
-  const haSection = document.getElementById('ha-section');
-  if (state.bmc_ha) {
-    haSection.classList.add('on');
-    const repDiv = document.getElementById('replicas');
-    const leader = state.bmc_ha.leader;
-    const leaderChanged = (lastLeader !== null && lastLeader !== leader);
-    repDiv.innerHTML = state.bmc_ha.replicas.map(r => {
-      const classes = ['rcard'];
-      if (r.is_leader) classes.push('leader');
-      if (!r.alive) classes.push('dead');
-      if (r.is_leader && leaderChanged) classes.push('flash');
-      const ageTxt = r.last_seen_age_ms != null
-        ? `${(r.last_seen_age_ms/1000).toFixed(1)}s ago`
-        : 'offline';
-      const tag = r.is_leader ? '<span class="rleader-tag">LEADER</span>' : '';
-      return `<div class="${classes.join(' ')}" title="${esc(r.endpoint)} · last seen ${esc(ageTxt)}">
-        <span class="rdot"></span>
-        <span class="rid">${esc(r.id.toUpperCase())}</span>
-        ${tag}
-        <div class="rep-chaos">
-          ${r.alive
-            ? `<button onclick="bmcChaos('kill','${r.id}')">KILL</button>`
-            : `<button class="revive" onclick="bmcChaos('revive','${r.id}')">REVIVE</button>`}
-        </div>
-      </div>`;
-    }).join('');
-    lastLeader = leader;
-  } else {
-    haSection.classList.remove('on');
-    lastLeader = null;
-  }
-
-  // BMC event log
-  const evtDiv = document.getElementById('bmclog');
-  evtDiv.innerHTML = state.bmc_events.slice(-40).map(evt => {
-    const arrowClass = evt.dir === '→' ? 'to-bmc' :
-                       evt.dir === '**' ? 'meta' : 'from-bmc';
-    const line = evt.line;
-    const lineClass = (line.startsWith('LEADER_CHANGED') ? 'leader' :
-                       line.startsWith('ACK ') ? 'ack' :
-                       line.startsWith('DEAD') ? 'dead' :
-                       line.startsWith('FAIL') ? 'fail' :
-                       line.startsWith('ALIVE') ? 'alive' :
-                       line.startsWith('PARTITION') ? 'partition' : '');
-    return `<div class="evt"><span class="arrow ${arrowClass}">${esc(evt.dir)}</span><span class="line ${lineClass}">${esc(line)}</span></div>`;
+  // BMC wire
+  const evt = document.getElementById('evt-log');
+  const evtHtml = (state.bmc_events||[]).slice(-30).map(e => {
+    const cls = e.dir === '→' ? 'out' : (e.dir === '**' ? 'meta' : 'in');
+    const line = e.line || '';
+    const lineCls = line.startsWith('LEADER_CHANGED') ? 'leader' :
+                    line.startsWith('ACK ') ? 'ack' :
+                    line.startsWith('DEAD') ? 'dead' :
+                    line.startsWith('FAIL') ? 'fail' :
+                    line.startsWith('ALIVE') ? 'alive' :
+                    line.startsWith('PARTITION') ? 'partition' : '';
+    return `<div class="evt"><span class="arr ${cls}">${esc(e.dir)}</span><span class="ln ${lineCls}">${esc(line)}</span></div>`;
   }).join('');
-  evtDiv.scrollTop = evtDiv.scrollHeight;
-
-  // Messages
-  const msgsDiv = document.getElementById('msgs');
-  const empty = document.getElementById('empty');
-  if (!state.messages.length) {
-    empty.style.display = 'flex';
-  } else {
-    empty.style.display = 'none';
-    // group messages by qid (user + assistant for each turn)
-    const turns = {};
-    for (const m of state.messages) {
-      if (!turns[m.qid]) turns[m.qid] = { user: null, asst: null, ts: m.ts };
-      if (m.role === 'user') turns[m.qid].user = m;
-      else turns[m.qid].asst = m;
-    }
-    const qids = Object.keys(turns);
-    let html = '';
-    for (const qid of qids) {
-      const t = turns[qid];
-      let block = `<div class="qblock">`;
-      if (t.user) {
-        block += `<div class="user-msg"><div class="user-bubble">${esc(t.user.content)}</div></div>`;
-      }
-      if (t.asst) {
-        const classes = ['asst'];
-        if (t.asst.aborted) classes.push('aborted');
-        const meta = [];
-        if (t.asst.tokens > 0) meta.push(`<span class="tok">${t.asst.tokens} tok</span>`);
-        if (t.asst.tps > 0) meta.push(`${t.asst.tps.toFixed(1)} tok/s`);
-        if (t.asst.step_latency_ms > 0) meta.push(`${t.asst.step_latency_ms.toFixed(0)}ms/step`);
-        block += `<div class="${classes.join(' ')}">`;
-        if (meta.length) block += `<div class="asst-meta">${meta.join(' · ')}</div>`;
-        // Per-stage latency strip — colored bars, one per worker, widths
-        // proportional to that stage's avg latency. Makes the bottleneck obvious.
-        const lats = t.asst.avg_stage_latencies_ms || [];
-        if (lats.length > 0 && state.workers.length === lats.length) {
-          const total = lats.reduce((a, b) => a + b, 0) || 1;
-          let barHtml = '<div class="stage-bar">';
-          lats.forEach((lat, i) => {
-            const w = state.workers[i];
-            const color = workerColor(w.id, state.workers);
-            const pct = (lat / total) * 100;
-            barHtml += `<div class="stage-seg" style="flex:${lat};background:${color}aa" `
-                     + `title="${esc(w.id)}: ${lat.toFixed(1)}ms avg">`
-                     + `<span>${esc(w.id)} ${lat.toFixed(0)}ms</span></div>`;
-          });
-          barHtml += '</div>';
-          block += barHtml;
-        }
-        block += `<div class="asst-body">${esc(t.asst.content || (state.busy ? '…' : ''))}</div>`;
-        if (t.asst.aborted) {
-          block += `<div class="asst-abort">⚠ ${esc(t.asst.abort_reason)}</div>`;
-        }
-        block += `</div>`;
-      }
-      block += `</div>`;
-      html += block;
-    }
-    msgsDiv.innerHTML = html;
-    msgsDiv.scrollTop = msgsDiv.scrollHeight;
+  if (evt._lastHtml !== evtHtml) {
+    setHTMLIfChanged(evt, evtHtml);
+    evt.scrollTop = evt.scrollHeight;
   }
-
-  // Disable Send while busy
-  document.getElementById('sbtn').disabled = state.busy;
 }
 
+function renderHA() {
+  const ha = state.bmc_ha;
+  const sect = document.getElementById('ha-sect');
+  if (!ha) { sect.style.display = 'none'; return; }
+  sect.style.display = 'block';
+  const repHtml = (ha.replicas||[]).map(r => {
+    const cls = ['rep'];
+    if (r.is_leader) cls.push('leader');
+    if (!r.alive) cls.push('dead');
+    const tag = r.is_leader ? `<span class="rep-tag">LEADER</span>` : '';
+    return `<div class="${cls.join(' ')}">
+      <span class="rep-dot"></span>
+      <span class="rep-name">${esc(r.id.toUpperCase())}</span>
+      ${tag}
+    </div>`;
+  }).join('');
+  setHTMLIfChanged(document.getElementById('replicas'), repHtml);
+}
+
+function renderQR() {
+  const url = state.public_url;
+  const urlEl = document.getElementById('conn-url');
+  urlEl.textContent = url || '—';
+  if (url && url !== qrUrl) {
+    const el = document.getElementById('qr');
+    el.innerHTML = '';
+    if (window.QRCode) {
+      new QRCode(el, { text: url, width: 88, height: 88, correctLevel: QRCode.CorrectLevel.M });
+    }
+    qrUrl = url;
+  }
+}
+
+// ─── actions ─────────────────────────────────────────────────────────────
 async function send() {
   const inp = document.getElementById('qin');
   const q = inp.value.trim();
-  if (!q) return;
+  if (!q || state?.busy) return;
   inp.value = '';
+  autosize(inp);
   try {
-    await fetch('/query', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({prompt: q}) });
-  } catch (e) {
-    console.error(e);
-  }
+    await fetch('/query', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ prompt: q, chat_id: state?.active_chat_id, max_tokens: 512 })
+    });
+  } catch (e) { console.error(e); }
 }
 
-async function chaos(action, workerId) {
+async function chaos(action, wid) {
   try {
-    await fetch('/chaos/' + action, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({worker_id: workerId}) });
-  } catch (e) {
-    console.error(e);
-  }
+    await fetch('/chaos/' + action, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ worker_id: wid })
+    });
+  } catch (e) { console.error(e); }
 }
 
-async function bmcChaos(action, replicaId) {
-  const ep = action === 'kill' ? '/chaos/bmc_kill' : '/chaos/bmc_revive';
+async function newChat() {
   try {
-    await fetch(ep, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({replica_id: replicaId}) });
-  } catch (e) {
-    console.error(e);
-  }
+    await fetch('/chats/new', { method: 'POST' });
+  } catch (e) { console.error(e); }
 }
 
-function fmt(n) { return n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n); }
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+async function deleteChat(id) {
+  try {
+    await fetch('/chats/' + id, { method: 'DELETE' });
+  } catch (e) { console.error(e); }
+}
+
+async function activateChat(id) {
+  if (state?.active_chat_id === id) return;
+  try {
+    await fetch('/chats/' + id + '/activate', { method: 'POST' });
+  } catch (e) { console.error(e); }
+}
+
+function copyUrl() {
+  const u = document.getElementById('conn-url').textContent;
+  if (!u) return;
+  navigator.clipboard.writeText(u).then(() => {
+    const t = document.getElementById('copy-toast');
+    t.textContent = 'copied';
+    t.style.opacity = 1;
+    setTimeout(() => t.style.opacity = 0, 1400);
+  });
+}
+
+// ─── utils ───────────────────────────────────────────────────────────────
+function autosize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function fmtInt(n) {
+  n = Number(n) || 0;
+  if (n >= 1000) return (n/1000).toFixed(1) + 'k';
+  return String(n);
+}
+function relTime(ts) {
+  const s = Math.round(Date.now()/1000 - (ts||0));
+  if (s < 10) return 'just now';
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.round(s/60) + 'm';
+  if (s < 86400) return Math.round(s/3600) + 'h';
+  return Math.round(s/86400) + 'd';
+}
 </script>
 </body>
 </html>

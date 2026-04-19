@@ -1,0 +1,9 @@
+unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git
+trl>=0.9,<0.13
+peft>=0.11
+accelerate>=0.30
+transformers>=4.44
+datasets>=2.18
+sentencepiece>=0.2
+huggingface_hub>=0.23
+pyyaml>=6.0

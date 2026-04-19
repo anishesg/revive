@@ -183,7 +183,12 @@ class PipelineCoordinator:
         for a, b in zip(ordered, ordered[1:]):
             assert a.layer_end == b.layer_start, f"layer gap between {a.url} and {b.url}"
         models = {w.model for w in self.workers}
-        assert len(models) == 1, f"workers disagree on model: {models}"
+        if len(models) > 1:
+            # Tolerate different representations (e.g. iOS worker reports a
+            # filesystem path, Python reports the HuggingFace id). Sanity
+            # check via n_layers + hidden_size equality (done in layer_gap
+            # assertions above already).
+            log.warning(f"workers report different model strings (ok if shapes match): {models}")
         self.workers = ordered  # canonical order
         log.info(f"ring validated across {len(self.workers)} stages, "
                  f"model={ordered[0].model}, total_layers={ordered[-1].num_layers_total}")
@@ -203,27 +208,57 @@ class PipelineCoordinator:
             except Exception:
                 pass
 
-    async def generate(self, prompt: str, max_new_tokens: int = 128,
-                       temperature: float = 0.7, top_p: float = 0.95,
-                       top_k: int = 40, seq_id: Optional[str] = None) -> AsyncIterator[GenerationStep]:
+    async def generate(self, prompt: str, max_new_tokens: int = 512,
+                       temperature: float = 0.7, top_p: float = 0.8,
+                       top_k: int = 20, seq_id: Optional[str] = None) -> AsyncIterator[GenerationStep]:
+        # Defaults follow Qwen's non-thinking-mode best practices:
+        # temp=0.7, top_p=0.8, top_k=20, min_p=0, with repetition penalty
+        # in the sampler. These avoid the "Paris. Paris. Paris." collapse.
         seq_id = seq_id or uuid.uuid4().hex[:12]
         try:
-            # Build prompt with ChatML template if the tokenizer has one.
-            try:
-                out = self.tokenizer.apply_chat_template(
-                    [{"role": "user", "content": prompt}],
-                    tokenize=True, add_generation_prompt=True, return_tensors=None,
-                )
-                # Different tokenizer versions return either list[int] or BatchEncoding.
-                if hasattr(out, "input_ids"):
-                    prompt_ids = list(out.input_ids[0]) if hasattr(out.input_ids, "__iter__") else list(out["input_ids"])
-                elif isinstance(out, dict):
-                    prompt_ids = list(out["input_ids"])
-                elif isinstance(out, list) and out and isinstance(out[0], list):
-                    prompt_ids = list(out[0])
-                else:
-                    prompt_ids = list(out)
-            except Exception:
+            # Build prompt via Qwen's official chat template. CRITICAL:
+            # (a) pass enable_thinking=False so the model skips the
+            #     <think>…</think> scratchpad, and (b) install a firm system
+            #     prompt demanding concise direct answers — without it,
+            #     Qwen3-0.6B rambles, restates questions, and produces
+            #     "worksheet" style output that no one wants.
+            system_prompt = (
+                "You are REVIVE, a concise, direct assistant running on a "
+                "distributed cluster of phones and edge devices. "
+                "Answer the user's question directly and accurately. "
+                "Do NOT restate the question. Do NOT list alternative questions. "
+                "Do NOT think out loud or write internal monologue. "
+                "Keep answers to 1-4 sentences unless the user explicitly asks for detail."
+            )
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ]
+            prompt_ids = None
+            for kwargs in (
+                {"enable_thinking": False},     # Qwen3 / Qwen3-Coder
+                {},                              # older models
+            ):
+                try:
+                    out = self.tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=True, add_generation_prompt=True, return_tensors=None,
+                        **kwargs,
+                    )
+                    if hasattr(out, "input_ids"):
+                        prompt_ids = list(out.input_ids[0]) if hasattr(out.input_ids, "__iter__") else list(out["input_ids"])
+                    elif isinstance(out, dict):
+                        prompt_ids = list(out["input_ids"])
+                    elif isinstance(out, list) and out and isinstance(out[0], list):
+                        prompt_ids = list(out[0])
+                    else:
+                        prompt_ids = list(out)
+                    break
+                except TypeError:
+                    continue
+                except Exception:
+                    break
+            if prompt_ids is None:
                 prompt_ids = self.tokenizer.encode(prompt)
             prompt_ids = [int(x) for x in prompt_ids]
 

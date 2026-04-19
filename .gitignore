@@ -45,3 +45,4 @@ android/app/src/main/cpp/llama.cpp
 .DS_Store
 .AppleDouble
 .LSOverride
+.claude/

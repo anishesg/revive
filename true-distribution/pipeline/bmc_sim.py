@@ -56,6 +56,7 @@ class BMCCore:
         self.num_layers = 0
         self.cluster_state = "down"
         self.infer_active = False
+        self.coord_url = ""  # set by host via COORDINATOR command
         self._boot()
 
     def _now_ms(self) -> float:
@@ -205,6 +206,13 @@ class BMCCore:
         self.infer_active = False
         self._set_state("down")
         self._emit("INFO cluster state cleared")
+
+    def on_coordinator(self, rest: str):
+        self.coord_url = rest.strip()[:79]
+        self._emit(f"ACK COORDINATOR {self.coord_url}")
+
+    def on_discover(self, rest: str):
+        self._emit(f"COORDINATOR {self.coord_url or 'unknown'}")
 
     def handle_line(self, line: str):
         cmd, rest = parse_event(line)

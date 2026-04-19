@@ -23,6 +23,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_revive._tcp</string>
+		<string>_revive-pp._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>REVIVE uses the local network to discover and communicate with worker phones in the swarm.</string>

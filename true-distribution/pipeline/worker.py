@@ -88,6 +88,11 @@ class PipelineStage:
         self._DynamicCache = DynamicCache
         self.caches: dict[str, object] = {}
         self.positions: dict[str, int] = {}  # tokens-already-seen counter
+        # Track recently-generated tokens per seq_id for presence penalty —
+        # this is the single biggest lever against "Paris. Paris. Paris."
+        # collapse on small Qwen3 models.
+        self.recent_tokens: dict[str, list[int]] = {}
+        self._recent_window = 128
 
         load_s = time.time() - t0
         log.info(
@@ -98,6 +103,7 @@ class PipelineStage:
     def reset(self, seq_id: str):
         self.caches.pop(seq_id, None)
         self.positions.pop(seq_id, None)
+        self.recent_tokens.pop(seq_id, None)
 
     def cache_for(self, seq_id: str):
         cache = self.caches.get(seq_id)
@@ -183,12 +189,30 @@ class PipelineStage:
             )
 
     def _sample(self, logits: torch.Tensor, frame: Frame) -> tuple[int, bool]:
-        """Sample from logits [1, 1, V] using temperature + top_k + top_p."""
+        """Sample from logits [1, 1, V] using Qwen3-recommended params:
+        repetition penalty (presence) → top_k → top_p → min_p → temperature
+        → multinomial. Matches vLLM / Qwen team recommendations."""
         logits = logits[0, -1, :].float()  # [V]
+
+        # (1) Repetition / presence penalty — applied BEFORE temperature so
+        #     it meaningfully shifts the ranking even at low temps. This is
+        #     the key fix for the "Paris. Paris. Paris." death spiral on
+        #     Qwen3-0.6B.
+        recent = self.recent_tokens.get(frame.seq_id) or []
+        if recent:
+            penalty = 1.15    # 1.0 = off, ~1.1–1.3 is typical
+            seen = torch.tensor(list(set(recent[-self._recent_window:])),
+                                 device=logits.device, dtype=torch.long)
+            sel = logits.index_select(0, seen)
+            # Multiplicative penalty with sign-aware branch (standard HF behavior)
+            sel = torch.where(sel > 0, sel / penalty, sel * penalty)
+            logits = logits.index_copy(0, seen, sel)
+
+        # (2) Temperature
         temp = max(frame.temperature, 1e-5)
         logits = logits / temp
 
-        # top_k
+        # (3) top_k
         if frame.top_k and frame.top_k > 0:
             topk = min(frame.top_k, logits.size(-1))
             vals, idx = torch.topk(logits, topk)
@@ -196,7 +220,7 @@ class PipelineStage:
             mask.scatter_(-1, idx, vals)
             logits = mask
 
-        # top_p (nucleus)
+        # (4) top_p (nucleus)
         if frame.top_p and frame.top_p < 1.0:
             sorted_logits, sorted_idx = torch.sort(logits, descending=True)
             probs = torch.softmax(sorted_logits, dim=-1)
@@ -207,8 +231,19 @@ class PipelineStage:
             sorted_logits[cutoff] = float("-inf")
             logits = torch.full_like(logits, float("-inf")).scatter_(-1, sorted_idx, sorted_logits)
 
+        # (5) min_p — prune tokens with probability below min_p × max_prob.
+        #     Qwen team recommends min_p=0 (disabled) by default. The frame
+        #     protocol doesn't carry min_p right now; left here for future.
+
         probs = torch.softmax(logits, dim=-1)
         token = int(torch.multinomial(probs, num_samples=1).item())
+
+        # Track recently-sampled token for the next step's penalty
+        rt = self.recent_tokens.setdefault(frame.seq_id, [])
+        rt.append(token)
+        if len(rt) > self._recent_window:
+            del rt[:-self._recent_window]
+
         raw = getattr(self.config, "eos_token_id", None)
         if raw is None:
             eos_ids: set[int] = set()

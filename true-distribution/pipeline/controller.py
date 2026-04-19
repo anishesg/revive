@@ -268,6 +268,12 @@ class ClusterController:
     async def reset(self):
         await self._send("RESET")
 
+    async def set_coordinator_url(self, url: str):
+        """Push the coordinator's LAN URL to the BMC. The BMC stores it and
+        re-emits it in response to DISCOVER — lets anyone plugging into the
+        BMC's serial port find the cluster."""
+        await self._send(f"COORDINATOR {url}")
+
     # ─── internals ─────────────────────────────────────────────────────
 
     async def _send(self, line: str):

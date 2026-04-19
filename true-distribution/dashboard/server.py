@@ -46,11 +46,32 @@ from pipeline.coordinator import (
     _worker_id,
 )
 from pipeline.multi_bmc import MultiBMCController
+from pipeline.net_utils import get_lan_ip
 
 log = logging.getLogger("dashboard")
 
 
 # ─── shared app state ─────────────────────────────────────────────────────
+
+class Chat:
+    """One conversation thread. Messages kept in order."""
+    def __init__(self, chat_id: str, title: str = "New chat"):
+        self.id = chat_id
+        self.title = title
+        self.created_at = time.time()
+        self.updated_at = time.time()
+        self.messages: list[dict] = []
+
+    def to_dict(self, include_messages: bool = True) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "messages": self.messages if include_messages else [],
+            "message_count": len(self.messages),
+        }
+
 
 class AppState:
     def __init__(self):
@@ -58,12 +79,49 @@ class AppState:
         self.coord: Optional[PipelineCoordinator] = None
         self.workers: list[WorkerEndpoint] = []
         self.sse_clients: list[web.StreamResponse] = []
-        self.messages: list[dict] = []     # chat history for the dashboard
         self.bmc_events: list[dict] = []   # recent BMC protocol events
         self.total_tokens = 0
         self.last_collective_tps = 0.0
         self.busy = False
-        self.bmc_source = "unknown"        # "arduino:/dev/..." or "simulator:tcp://..."
+        self.bmc_source = "unknown"
+        self.lan_ip: str = "127.0.0.1"
+        self.public_url: str = ""
+        self.dashboard_port: int = 4100
+
+        # Chats
+        self.chats: dict[str, Chat] = {}
+        self.active_chat_id: Optional[str] = None
+        self._seed_initial_chat()
+
+    def _seed_initial_chat(self):
+        cid = uuid.uuid4().hex[:8]
+        self.chats[cid] = Chat(cid, title="New chat")
+        self.active_chat_id = cid
+
+    def active_chat(self) -> Optional[Chat]:
+        if self.active_chat_id is None:
+            return None
+        return self.chats.get(self.active_chat_id)
+
+    def create_chat(self, title: str = "New chat") -> Chat:
+        cid = uuid.uuid4().hex[:8]
+        chat = Chat(cid, title=title)
+        self.chats[cid] = chat
+        self.active_chat_id = cid
+        return chat
+
+    def delete_chat(self, chat_id: str) -> bool:
+        if chat_id not in self.chats:
+            return False
+        del self.chats[chat_id]
+        if self.active_chat_id == chat_id:
+            # Pick next available, or seed a new one
+            remaining = sorted(self.chats.values(), key=lambda c: c.updated_at, reverse=True)
+            if remaining:
+                self.active_chat_id = remaining[0].id
+            else:
+                self._seed_initial_chat()
+        return True
 
     def snapshot(self) -> dict:
         ctrl = self.controller
@@ -94,12 +152,23 @@ class AppState:
                 "is_last": w.is_last,
                 "dead": wid in (ctrl.view.dead_workers if ctrl else set()),
             })
+        # Chat metadata for sidebar (light — no messages)
+        chat_list = [c.to_dict(include_messages=False)
+                     for c in sorted(self.chats.values(),
+                                      key=lambda c: c.updated_at, reverse=True)]
+        active = self.active_chat()
+        active_messages = active.messages[-100:] if active else []
+
         return {
             "bmc": bmc,
             "bmc_ha": bmc_ha,
             "bmc_source": self.bmc_source,
+            "lan_ip": self.lan_ip,
+            "public_url": self.public_url,
             "workers": workers_info,
-            "messages": self.messages[-100:],
+            "chats": chat_list,
+            "active_chat_id": self.active_chat_id,
+            "messages": active_messages,
             "bmc_events": self.bmc_events[-40:],
             "total_tokens": self.total_tokens,
             "collective_tps": self.last_collective_tps,
@@ -153,9 +222,12 @@ async def handle_query(request: web.Request) -> web.Response:
     state: AppState = request.app["state"]
     body = await request.json()
     prompt = body.get("prompt", "").strip()
-    max_tokens = int(body.get("max_tokens", 80))
+    max_tokens = int(body.get("max_tokens", 512))  # big default — Qwen naturally hits <|im_end|> way before this
+    chat_id = body.get("chat_id") or state.active_chat_id
     if not prompt:
         return web.json_response({"ok": False, "error": "empty prompt"}, status=400)
+    if chat_id and chat_id != state.active_chat_id:
+        state.active_chat_id = chat_id
 
     if state.busy:
         return web.json_response({"ok": False, "error": "already generating"}, status=409)
@@ -163,23 +235,69 @@ async def handle_query(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+import re as _re
+_THINK_RE = _re.compile(r"<think>.*?</think>\s*", _re.DOTALL | _re.IGNORECASE)
+_LEAK_HEADS = (
+    "here's the prompt:", "here is the prompt:", "the prompt is:",
+    "the answer should be", "also include examples",
+    "okay, so i need to", "let me think", "let me start by", "let me recall",
+    "first, i need to", "i should",
+)
+
+
+def _clean_output(text: str) -> str:
+    """Sanitize generated text before it's shown to the user.
+
+    Strips:
+      1. <think>...</think> blocks (thinking-mode leakage)
+      2. The whole tail of the output starting at obvious reasoning/meta
+         patterns like "Okay, so I need to..." — Qwen3-0.6B tends to
+         continue into a second round of meta-reasoning that ruins the
+         answer. We keep only the first clean chunk.
+    """
+    if not text:
+        return text
+    # 1) remove <think> blocks
+    text = _THINK_RE.sub("", text)
+
+    # 2) cut at the first leak heading (case-insensitive).
+    lower = text.lower()
+    cut = len(text)
+    for head in _LEAK_HEADS:
+        idx = lower.find(head)
+        if idx >= 0 and idx < cut:
+            cut = idx
+    # also cut at an obvious "Here's the prompt: \"..." if we spot it mid-text
+    text = text[:cut]
+    return text.strip()
+
+
 async def _run_query(state: AppState, prompt: str, max_tokens: int):
     state.busy = True
+    chat = state.active_chat()
+    if chat is None:
+        chat = state.create_chat()
+
+    # Auto-title the chat from the first prompt
+    if chat.title == "New chat" and not chat.messages:
+        chat.title = prompt if len(prompt) <= 40 else prompt[:38] + "…"
+
     await broadcast(state)
     qid = uuid.uuid4().hex[:8]
-    state.messages.append({
+    chat.messages.append({
         "role": "user", "content": prompt, "qid": qid, "ts": time.time()
     })
+    chat.updated_at = time.time()
     await broadcast(state)
     assistant_entry = {
         "role": "assistant", "content": "", "qid": qid, "ts": time.time(),
         "tps": 0.0, "tokens": 0, "aborted": False, "abort_reason": "",
-        # Per-stage rolling averages — judges see "phone1: 12ms · pi: 32ms · phone2: 14ms".
-        "stage_latencies_ms": [],   # last token's per-stage breakdown
+        "stage_latencies_ms": [],
         "avg_stage_latencies_ms": [],
         "step_latency_ms": 0.0,
+        "streaming": True,
     }
-    state.messages.append(assistant_entry)
+    chat.messages.append(assistant_entry)
 
     t0 = time.time()
     tokens = 0
@@ -214,11 +332,15 @@ async def _run_query(state: AppState, prompt: str, max_tokens: int):
                 await broadcast(state)
                 last_broadcast = now
         assistant_entry["tps"] = tokens / max(time.time() - t0, 1e-6)
+        # Final sanitization pass — removes any thinking-leak tail
+        assistant_entry["content"] = _clean_output(assistant_entry["content"])
     except ClusterDegraded as e:
         assistant_entry["aborted"] = True
         assistant_entry["abort_reason"] = str(e)
     finally:
+        assistant_entry["streaming"] = False
         state.busy = False
+        chat.updated_at = time.time()
         await broadcast(state)
 
 
@@ -282,7 +404,13 @@ async def handle_bmc_revive(request: web.Request) -> web.Response:
 
 async def handle_index(request: web.Request) -> web.StreamResponse:
     here = os.path.dirname(os.path.abspath(__file__))
-    return web.FileResponse(os.path.join(here, "index.html"))
+    # Disable caching so dashboard edits show on a normal refresh — avoids
+    # "reload is stuck" / "I see the old UI" issues during iteration.
+    resp = web.FileResponse(os.path.join(here, "index.html"))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 async def handle_bmc_log(request: web.Request) -> web.Response:
@@ -292,6 +420,48 @@ async def handle_bmc_log(request: web.Request) -> web.Response:
         {"ts": ts, "dir": d.strip(), "line": line}
         for (ts, d, line) in log_lines
     ])
+
+
+async def handle_chat_new(request: web.Request) -> web.Response:
+    state: AppState = request.app["state"]
+    chat = state.create_chat()
+    await broadcast(state)
+    return web.json_response({"ok": True, "chat_id": chat.id})
+
+
+async def handle_chat_delete(request: web.Request) -> web.Response:
+    state: AppState = request.app["state"]
+    chat_id = request.match_info["chat_id"]
+    ok = state.delete_chat(chat_id)
+    await broadcast(state)
+    return web.json_response({"ok": ok})
+
+
+async def handle_chat_activate(request: web.Request) -> web.Response:
+    state: AppState = request.app["state"]
+    chat_id = request.match_info["chat_id"]
+    if chat_id not in state.chats:
+        return web.json_response({"ok": False, "error": "unknown chat"}, status=404)
+    state.active_chat_id = chat_id
+    await broadcast(state)
+    return web.json_response({"ok": True})
+
+
+async def handle_discover(request: web.Request) -> web.Response:
+    """Lightweight JSON endpoint for phones/iPads to auto-discover the cluster.
+    A worker app can hit http://<mac_ip>:4100/discover to find out how to
+    join. Complements the Arduino's serial-level DISCOVER reply."""
+    state: AppState = request.app["state"]
+    return web.json_response({
+        "public_url": state.public_url,
+        "lan_ip": state.lan_ip,
+        "port": state.dashboard_port,
+        "register_worker": f"{state.public_url}/worker-register",
+        "events_stream": f"{state.public_url}/events",
+        "bmc_state": state.controller.view.state if state.controller else "disconnected",
+        "model": state.workers[0].model if state.workers else None,
+        "num_workers_connected": len(state.workers),
+    })
 
 
 # ─── app startup / shutdown ───────────────────────────────────────────────
@@ -327,6 +497,12 @@ async def _wire_bmc_events_to_broadcast(state: AppState):
 async def on_startup(app: web.Application):
     cfg = app["config"]
     state: AppState = app["state"]
+
+    # Detect LAN IP so phones/iPads on the same network can reach the dashboard.
+    state.lan_ip = get_lan_ip()
+    state.dashboard_port = int(cfg.get("dashboard_port", 4100))
+    state.public_url = f"http://{state.lan_ip}:{state.dashboard_port}"
+    log.info(f"dashboard LAN URL: {state.public_url}")
 
     bmc_count = int(cfg.get("bmc_count", 1))
 
@@ -373,6 +549,13 @@ async def on_startup(app: web.Application):
         await state.controller.start()
         await _wire_bmc_events_to_broadcast(state)
 
+    # Push our LAN URL to the BMC so DISCOVER returns it. Works for both
+    # single-controller and multi-BMC modes (same method signature).
+    try:
+        await state.controller.set_coordinator_url(state.public_url)
+    except Exception as e:
+        log.warning(f"could not push coordinator URL to BMC: {e}")
+
     # 3. Build coordinator
     endpoints = []
     for hp in cfg["worker_urls"]:
@@ -414,6 +597,10 @@ def build_app(config: dict) -> web.Application:
     app.router.add_post("/chaos/bmc_kill", handle_bmc_kill)
     app.router.add_post("/chaos/bmc_revive", handle_bmc_revive)
     app.router.add_get("/bmc/log", handle_bmc_log)
+    app.router.add_get("/discover", handle_discover)
+    app.router.add_post("/chats/new", handle_chat_new)
+    app.router.add_delete("/chats/{chat_id}", handle_chat_delete)
+    app.router.add_post("/chats/{chat_id}/activate", handle_chat_activate)
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     return app
@@ -436,7 +623,9 @@ def main():
                         "overrides the simulator path when set")
     p.add_argument("--auto-serial", action="store_true",
                    help="try to auto-detect an Arduino on a USB serial port and use it")
-    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--host", default="0.0.0.0",
+                   help="bind address — default 0.0.0.0 so phones/iPads on the "
+                        "same WiFi can reach the dashboard via the Mac's LAN IP")
     p.add_argument("--port", type=int, default=4100)
     p.add_argument("--log-level", default="INFO")
     args = p.parse_args()
@@ -457,6 +646,7 @@ def main():
         "bmc_count": args.bmc_count,
         "start_bmc_sim": not args.no_start_bmc and not serial_device,
         "serial_device": serial_device,
+        "dashboard_port": args.port,
     }
     app = build_app(config)
     if args.bmc_count > 1:

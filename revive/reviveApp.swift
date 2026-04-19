@@ -6,14 +6,11 @@ struct ReviveApp: App {
 
     var body: some Scene {
         WindowGroup {
-            switch appMode {
-            case .unset:
-                ModeSelectionView(appMode: $appMode)
-            case .worker:
-                WorkerView()
-            case .coordinator:
-                CoordinatorView()
-            }
+            // Pipeline Stage is now the primary flow. The earlier role-based
+            // worker and coordinator modes are kept for backwards compat but
+            // no longer surfaced in the entry UI — the user can switch them
+            // by changing the `appMode` default below.
+            PipelineWorkerView()
         }
     }
 }
@@ -22,6 +19,7 @@ enum AppMode: String, RawRepresentable {
     case unset = "unset"
     case worker = "worker"
     case coordinator = "coordinator"
+    case pipelineWorker = "pipelineWorker"
 }
 
 struct ModeSelectionView: View {
@@ -59,6 +57,15 @@ struct ModeSelectionView: View {
                         color: Color(hex: "#4a90d9")
                     ) {
                         appMode = .coordinator
+                    }
+
+                    ModeCard(
+                        title: "🔗 Pipeline Stage",
+                        subtitle: "Run a slice of a bigger model.",
+                        description: "This device holds only a contiguous range of transformer layers and exchanges hidden states with other phones. Lets the swarm collectively run models no single phone can.",
+                        color: Color(hex: "#F5A623")
+                    ) {
+                        appMode = .pipelineWorker
                     }
                 }
                 .padding(.horizontal, 24)

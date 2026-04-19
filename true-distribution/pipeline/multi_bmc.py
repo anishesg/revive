@@ -129,6 +129,9 @@ class MultiBMCController:
     async def reset(self):
         await self._broadcast("RESET")
 
+    async def set_coordinator_url(self, url: str):
+        await self._broadcast(f"COORDINATOR {url}")
+
     # Compatibility with the dashboard server's existing _log hook
     def _log(self, direction: str, line: str):
         ts = time.time()

@@ -77,11 +77,13 @@ echo "Press Ctrl-C to stop. Workers will keep running — run scripts/stop_local
 echo ""
 
 EXTRA=()
-# If $SERIAL env var is set (e.g. SERIAL=/dev/tty.usbmodem14101), use the real
-# Arduino BMC. If SERIAL=auto, try to detect one.
-if [ "${SERIAL:-}" = "auto" ]; then
+# Auto-detect Arduino by default. Override with SERIAL=/dev/tty.usbmodem1301
+# (specific path) or SERIAL=off (force simulator).
+if [ "${SERIAL:-auto}" = "off" ]; then
+  : # do nothing → simulator
+elif [ "${SERIAL:-auto}" = "auto" ]; then
   EXTRA+=(--auto-serial)
-elif [ -n "${SERIAL:-}" ]; then
+else
   EXTRA+=(--serial-device "$SERIAL")
 fi
 

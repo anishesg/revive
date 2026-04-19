@@ -16,6 +16,12 @@ Line-oriented text protocol, one message per line. Simple so it fits in
   FAIL <id>                          inject failure (testing/chaos)
   QUERY                              ask BMC for current partition
   RESET                              drop all cluster state
+  COORDINATOR <url>                  tell BMC where the coordinator lives;
+                                     BMC stores the URL and re-emits it in
+                                     response to DISCOVER. Lets a phone /
+                                     iPad query the Arduino over serial to
+                                     learn the cluster's LAN endpoint.
+  DISCOVER                           ask BMC for COORDINATOR <url>
 
 ─── BMC → Host (events) ───────────────────────────────────────────────────
 

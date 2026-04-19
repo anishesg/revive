@@ -28,6 +28,7 @@ targets:
         NSLocalNetworkUsageDescription: "REVIVE uses the local network to discover and communicate with worker phones in the swarm."
         NSBonjourServices:
           - "_revive._tcp"
+          - "_revive-pp._tcp"
         UIBackgroundModes:
           - audio
           - fetch
