@@ -16,8 +16,16 @@
 #define LINE_BUF             128
 #define HB_TIMEOUT_MS        6000  // ~2 missed @ 3s cadence
 #define MAX_LAYERS           64
-#define FW_VERSION           2
+#define FW_VERSION           3     // bumped for FAN command
 #define COORD_URL_LEN        80    // "http://255.255.255.255:65535/worker" + slack
+
+// Fan output — 8-bit PWM on D3. Drive a MOSFET / NPN / Grove Transistor
+// gate from this pin (fan's own power is 5V+GND; the transistor switches
+// its ground path). Unmodulated direct-to-5V wiring will just stay on —
+// the pin still produces a meaningful signal that the host reads back.
+#define FAN_PIN              3
+#define FAN_SAFETY_FLOOR     0     // set >0 to force minimum airflow
+#define FAN_TICK_MS          1000  // how often to emit STATUS FAN
 
 struct Worker {
   char id[MAX_ID_LEN];
@@ -41,6 +49,16 @@ uint32_t last_health_check_ms = 0;
 bool infer_active = false;
 char cluster_state[12] = "down";  // down, degraded, healthy
 char coord_url[COORD_URL_LEN] = ""; // coordinator discovery URL (empty until host pushes)
+
+// Fan control state. The host computes the duty from load/temperature/HA
+// signals and pushes it via `FAN <0-255>`. Firmware holds the most recent
+// value, floors it at FAN_SAFETY_FLOOR, and writes it to the PWM pin.
+// `fan_last_host_ms` tracks staleness so a silent host doesn't leave the
+// fan stuck at full-tilt forever.
+uint8_t  fan_duty = 0;
+uint32_t fan_last_host_ms = 0;
+uint32_t fan_last_tick_ms = 0;
+const uint32_t FAN_HOST_STALE_MS = 15000; // if host silent this long, fall back to autonomous
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 
@@ -237,6 +255,51 @@ void handle_discover() {
   Serial.println(coord_url[0] ? coord_url : "unknown");
 }
 
+// ─── fan ───────────────────────────────────────────────────────────────────
+
+void apply_fan_duty(uint8_t duty) {
+  if (duty < FAN_SAFETY_FLOOR) duty = FAN_SAFETY_FLOOR;
+  fan_duty = duty;
+  analogWrite(FAN_PIN, fan_duty);
+}
+
+void handle_fan(char* rest) {
+  if (!rest) return;
+  while (*rest == ' ') rest++;
+  int v = atoi(rest);
+  if (v < 0) v = 0;
+  if (v > 255) v = 255;
+  apply_fan_duty((uint8_t)v);
+  fan_last_host_ms = millis();
+  Serial.print(F("ACK FAN "));
+  Serial.println(fan_duty);
+}
+
+// Autonomous fallback: if the host hasn't sent a FAN command for a while,
+// run a simple policy based solely on BMC state so the fan still tracks
+// load roughly (infer -> spin; degraded -> boost; down -> off + floor).
+uint8_t autonomous_fan_duty() {
+  if (strcmp(cluster_state, "down") == 0) return 0;
+  if (strcmp(cluster_state, "degraded") == 0) return 200;
+  if (infer_active) return 160;
+  return 40;  // healthy + idle — gentle airflow
+}
+
+void fan_tick() {
+  uint32_t now = millis();
+  if (now - fan_last_tick_ms < FAN_TICK_MS) return;
+  fan_last_tick_ms = now;
+
+  bool host_stale = (fan_last_host_ms == 0) ||
+                    (now - fan_last_host_ms > FAN_HOST_STALE_MS);
+  if (host_stale) apply_fan_duty(autonomous_fan_duty());
+
+  Serial.print(F("STATUS FAN "));
+  Serial.print(fan_duty);
+  Serial.print(F(" src="));
+  Serial.println(host_stale ? F("auto") : F("host"));
+}
+
 // ─── dispatch ──────────────────────────────────────────────────────────────
 
 void process_line(char* line) {
@@ -254,6 +317,7 @@ void process_line(char* line) {
   else if (!strcmp(cmd, "RESET"))        handle_reset();
   else if (!strcmp(cmd, "COORDINATOR"))  handle_coordinator(rest);
   else if (!strcmp(cmd, "DISCOVER"))     handle_discover();
+  else if (!strcmp(cmd, "FAN"))          handle_fan(rest);
   else { Serial.print(F("INFO unknown cmd ")); Serial.println(cmd); }
 }
 
@@ -293,6 +357,8 @@ void health_check() {
 void setup() {
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(FAN_PIN, OUTPUT);
+  apply_fan_duty(0);
   set_state("down");
   Serial.print(F("READY "));
   Serial.println(FW_VERSION);
@@ -313,4 +379,5 @@ void loop() {
   }
   health_check();
   update_led();
+  fan_tick();
 }

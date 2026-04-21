@@ -45,6 +45,7 @@ from pipeline.coordinator import (
     WorkerEndpoint,
     _worker_id,
 )
+from pipeline.fan_policy import FanController, FanInputs
 from pipeline.multi_bmc import MultiBMCController
 from pipeline.net_utils import get_lan_ip
 
@@ -82,8 +83,12 @@ class AppState:
         self.bmc_events: list[dict] = []   # recent BMC protocol events
         self.total_tokens = 0
         self.last_collective_tps = 0.0
+        self.last_step_latency_ms = 0.0
+        self.last_token_ts: float = 0.0
         self.busy = False
         self.bmc_source = "unknown"
+        self.desired_fan_duty: int = 0
+        self.fan_ctrl = FanController()
         self.lan_ip: str = "127.0.0.1"
         self.public_url: str = ""
         self.dashboard_port: int = 4100
@@ -131,6 +136,12 @@ class AppState:
             "dead_workers": list(ctrl.view.dead_workers) if ctrl else [],
             "version": ctrl.view.version if ctrl else 0,
         }
+        fan = {
+            "duty": ctrl.view.fan_duty if ctrl else 0,
+            "percent": round((ctrl.view.fan_duty / 255) * 100) if ctrl else 0,
+            "source": ctrl.view.fan_source if ctrl else "unknown",
+            "desired": getattr(self, "desired_fan_duty", 0),
+        }
         # Multi-BMC HA info (None when running single-BMC mode)
         bmc_ha = None
         if isinstance(ctrl, MultiBMCController):
@@ -162,6 +173,7 @@ class AppState:
         return {
             "bmc": bmc,
             "bmc_ha": bmc_ha,
+            "fan": fan,
             "bmc_source": self.bmc_source,
             "lan_ip": self.lan_ip,
             "public_url": self.public_url,
@@ -289,13 +301,26 @@ async def _run_query(state: AppState, prompt: str, max_tokens: int):
     })
     chat.updated_at = time.time()
     await broadcast(state)
+    bedrock_on = os.environ.get("REVIVE_BEDROCK_REFINE", "0") == "1"
+    # When refinement is on, the swarm's raw stream renders as a "Thinking"
+    # block (gray, muted) above a bright final answer that Bedrock writes
+    # into `content`. When refinement is off, the swarm writes straight into
+    # `content` as it always has.
+    swarm_field = "thinking" if bedrock_on else "content"
+    # Let the draft breathe when it's only going into the Thinking block —
+    # truncating the rambling mid-sentence looks worse than finishing it.
+    swarm_budget = max(max_tokens, 1024) if bedrock_on else max_tokens
+
     assistant_entry = {
-        "role": "assistant", "content": "", "qid": qid, "ts": time.time(),
+        "role": "assistant", "content": "", "thinking": "",
+        "phase": "thinking" if bedrock_on else "refining",  # purely informational for UI
+        "qid": qid, "ts": time.time(),
         "tps": 0.0, "tokens": 0, "aborted": False, "abort_reason": "",
         "stage_latencies_ms": [],
         "avg_stage_latencies_ms": [],
         "step_latency_ms": 0.0,
         "streaming": True,
+        "refined": False,
     }
     chat.messages.append(assistant_entry)
 
@@ -304,41 +329,93 @@ async def _run_query(state: AppState, prompt: str, max_tokens: int):
     stage_lat_sums: list[float] = []
     last_broadcast = 0.0
     try:
-        async for step in state.coord.generate(prompt, max_new_tokens=max_tokens,
-                                                temperature=0.7, top_p=0.95, top_k=40):
-            assistant_entry["content"] += step.token_text
-            tokens += 1
-            state.total_tokens += 1
-            dt = time.time() - t0
-            assistant_entry["tokens"] = tokens
-            assistant_entry["tps"] = tokens / dt if dt > 0 else 0
-            assistant_entry["stage_latencies_ms"] = step.stage_latencies_ms
-            assistant_entry["step_latency_ms"] = step.step_latency_ms
-            # Rolling average per stage
-            if not stage_lat_sums:
-                stage_lat_sums = list(step.stage_latencies_ms)
-            else:
-                for i, v in enumerate(step.stage_latencies_ms):
-                    if i < len(stage_lat_sums):
-                        stage_lat_sums[i] += v
-                    else:
-                        stage_lat_sums.append(v)
-            assistant_entry["avg_stage_latencies_ms"] = [s / tokens for s in stage_lat_sums]
-            state.last_collective_tps = assistant_entry["tps"]
-            # Per-token broadcast, but coalesce if SSE clients can't keep up.
-            # Hard cap: at most 30 broadcasts/sec to avoid drowning the browser.
-            now = time.time()
-            if (now - last_broadcast) >= 0.033 or step.eos:
-                await broadcast(state)
-                last_broadcast = now
+        # Swarm phase. Isolated so any worker glitch (timeout, JSON decode, etc.)
+        # is captured as a draft-level failure rather than killing the whole
+        # turn — we still want to run the Bedrock refinement on whatever draft
+        # we've managed to stream.
+        try:
+            async for step in state.coord.generate(prompt, max_new_tokens=swarm_budget,
+                                                    temperature=0.7, top_p=0.95, top_k=40):
+                assistant_entry[swarm_field] += step.token_text
+                tokens += 1
+                state.total_tokens += 1
+                dt = time.time() - t0
+                assistant_entry["tokens"] = tokens
+                assistant_entry["tps"] = tokens / dt if dt > 0 else 0
+                assistant_entry["stage_latencies_ms"] = step.stage_latencies_ms
+                assistant_entry["step_latency_ms"] = step.step_latency_ms
+                # Rolling average per stage
+                if not stage_lat_sums:
+                    stage_lat_sums = list(step.stage_latencies_ms)
+                else:
+                    for i, v in enumerate(step.stage_latencies_ms):
+                        if i < len(stage_lat_sums):
+                            stage_lat_sums[i] += v
+                        else:
+                            stage_lat_sums.append(v)
+                assistant_entry["avg_stage_latencies_ms"] = [s / tokens for s in stage_lat_sums]
+                state.last_collective_tps = assistant_entry["tps"]
+                state.last_step_latency_ms = step.step_latency_ms
+                state.last_token_ts = time.time()
+                # Per-token broadcast, but coalesce if SSE clients can't keep up.
+                # Hard cap: at most 30 broadcasts/sec to avoid drowning the browser.
+                now = time.time()
+                if (now - last_broadcast) >= 0.033 or step.eos:
+                    await broadcast(state)
+                    last_broadcast = now
+        except ClusterDegraded as e:
+            assistant_entry["aborted"] = True
+            assistant_entry["abort_reason"] = str(e)
+        except Exception as e:  # worker RPC failure, JSON glitch, etc.
+            log.warning(f"[swarm] generate failed mid-stream: {e}")
+            assistant_entry["abort_reason"] = f"swarm: {e}"
+
         assistant_entry["tps"] = tokens / max(time.time() - t0, 1e-6)
-        # Final sanitization pass — removes any thinking-leak tail
-        assistant_entry["content"] = _clean_output(assistant_entry["content"])
-    except ClusterDegraded as e:
-        assistant_entry["aborted"] = True
-        assistant_entry["abort_reason"] = str(e)
+        # Final sanitization pass only applies when the swarm output is
+        # the user-visible answer. When Bedrock is the final stage, the
+        # swarm text IS the thinking — we want to keep the meta-reasoning
+        # the sanitizer would otherwise strip, both for the "Thinking" UI
+        # block and as context for the refinement prompt.
+        if not bedrock_on:
+            raw = assistant_entry["content"]
+            cleaned = _clean_output(raw)
+            # If the sanitizer stripped everything (e.g. the model wrapped its
+            # whole reply in <think>...</think> or opened with a leak head),
+            # fall back to the raw text so the user still sees the answer.
+            assistant_entry["content"] = cleaned if cleaned else raw
+
+        if bedrock_on:
+            # Don't silently hide swarm failures behind a Bedrock answer. If
+            # the distributed pipeline produced no real draft, mark the turn
+            # as aborted and skip refinement — the user needs to see that
+            # the phones did nothing, not a cloud answer pretending they did.
+            draft = (assistant_entry["thinking"] or "").strip()
+            if not draft or tokens < 4:
+                reason = assistant_entry.get("abort_reason") or "swarm produced no tokens"
+                log.warning(f"[swarm] skipping refine — {reason}")
+                assistant_entry["aborted"] = True
+                assistant_entry["abort_reason"] = reason
+                assistant_entry["content"] = f"[cluster error] {reason}"
+            else:
+                try:
+                    from temp.refine import refine as _bedrock_refine  # noqa
+                    assistant_entry["phase"] = "refining"
+                    await broadcast(state)
+                    last_broadcast = 0.0
+                    async for delta in _bedrock_refine(prompt, draft):
+                        assistant_entry["content"] += delta
+                        now = time.time()
+                        if (now - last_broadcast) >= 0.033:
+                            await broadcast(state)
+                            last_broadcast = now
+                    assistant_entry["refined"] = True
+                except Exception as exc:  # network, auth, quota — fall back gracefully
+                    log.warning(f"[temp] bedrock refine skipped: {exc}")
+                    if not assistant_entry["content"]:
+                        assistant_entry["content"] = assistant_entry["thinking"]
     finally:
         assistant_entry["streaming"] = False
+        assistant_entry["phase"] = "done"
         state.busy = False
         chat.updated_at = time.time()
         await broadcast(state)
@@ -437,6 +514,41 @@ async def handle_chat_delete(request: web.Request) -> web.Response:
     return web.json_response({"ok": ok})
 
 
+async def _fan_loop(state: AppState):
+    """Background ticker: every 500 ms, compute desired fan duty from live
+    load + cluster state, and push to BMC if it's moved meaningfully."""
+    try:
+        while True:
+            await asyncio.sleep(0.5)
+            ctrl = state.controller
+            if ctrl is None:
+                continue
+            now = time.time()
+            since_token = (now - state.last_token_ts) if state.last_token_ts else 1e9
+            inp = FanInputs(
+                bmc_state=ctrl.view.state,
+                inference_active=bool(state.busy),
+                seconds_since_last_token=since_token,
+                aggregate_tps=float(state.last_collective_tps),
+                step_latency_ms=float(state.last_step_latency_ms),
+            )
+            duty = state.fan_ctrl.step(inp)
+            state.desired_fan_duty = duty
+            if state.fan_ctrl.should_send(duty):
+                try:
+                    await ctrl.set_fan_duty(duty)
+                except Exception as e:
+                    log.debug(f"fan: set_fan_duty failed: {e}")
+    except asyncio.CancelledError:
+        # Best-effort: drop fan to idle on shutdown.
+        try:
+            if state.controller:
+                await state.controller.set_fan_duty(0)
+        except Exception:
+            pass
+        raise
+
+
 async def handle_chat_activate(request: web.Request) -> web.Response:
     state: AppState = request.app["state"]
     chat_id = request.match_info["chat_id"]
@@ -445,6 +557,71 @@ async def handle_chat_activate(request: web.Request) -> web.Response:
     state.active_chat_id = chat_id
     await broadcast(state)
     return web.json_response({"ok": True})
+
+
+async def handle_display(request: web.Request) -> web.Response:
+    """Compact JSON endpoint for the SenseCAP Indicator display firmware."""
+    state: AppState = request.app["state"]
+    ctrl = state.controller
+    workers = []
+    for w in state.workers:
+        wid = _worker_id(w)
+        workers.append({
+            "id": wid[:10],
+            "s": w.layer_start,
+            "e": w.layer_end,
+            "ok": wid not in (ctrl.view.dead_workers if ctrl else set()),
+        })
+    # Grab the latest assistant message's phase + active text.
+    # Prefer the most recently updated chat that has an assistant message —
+    # the dashboard UI sometimes leaves an empty "New chat" as the active
+    # one, which would make the display go blank during a real run.
+    phase = "idle"
+    text = ""
+    chat = None
+    for c in sorted(state.chats.values(), key=lambda c: c.updated_at, reverse=True):
+        if any(m.get("role") == "assistant" for m in c.messages):
+            chat = c
+            break
+    if chat is None:
+        chat = state.active_chat()
+    if chat:
+        for msg in reversed(chat.messages):
+            if msg.get("role") == "assistant":
+                phase = msg.get("phase", "done")
+                # Only at phase=done do we surface the refined/final answer.
+                # While thinking OR refining, keep showing the swarm's live
+                # draft — the full distributed pipeline output is the "thinking"
+                # the user wants to watch.
+                if phase == "done":
+                    text = msg.get("content") or msg.get("thinking") or ""
+                else:
+                    text = msg.get("thinking") or msg.get("content") or ""
+                break
+    if phase == "done":
+        # Final answer: first 1-2 sentences, plain prose, nothing fancy.
+        stripped = _clean_output(text).strip() or text.strip()
+        for bad in ("```", "\\boxed", "$$"):
+            stripped = stripped.replace(bad, "")
+        stripped = stripped.replace("\n", " ")
+        import re as _re
+        parts = _re.split(r"(?<=[.!?])\s+", stripped)
+        short = " ".join(p for p in parts[:2] if p).strip()
+        text = (short or stripped)[:180]
+    else:
+        # Streaming: collapse "thinking" and "refining" into a single
+        # "THINKING" state on the display, and keep showing the swarm draft.
+        phase = "thinking"
+        text = text[-240:]
+    return web.json_response({
+        "st": ctrl.view.state if ctrl else "down",
+        "ws": workers,
+        "tps": round(state.last_collective_tps, 1),
+        "busy": state.busy,
+        "layers": state.workers[0].num_layers_total if state.workers else 0,
+        "phase": phase,
+        "text": text,
+    })
 
 
 async def handle_discover(request: web.Request) -> web.Response:
@@ -567,6 +744,10 @@ async def on_startup(app: web.Application):
     log.info(f"dashboard ready — BMC state={state.controller.view.state} "
              f"partition={state.controller.view.partition}")
 
+    # Start the cooling policy loop. Ticks 2 Hz — fast enough to track the
+    # start of an inference without over-sending to the Arduino serial link.
+    app["fan_task"] = asyncio.create_task(_fan_loop(state))
+
 
 async def on_cleanup(app: web.Application):
     state: AppState = app["state"]
@@ -583,6 +764,9 @@ async def on_cleanup(app: web.Application):
     bmc_task = app.get("bmc_task")
     if bmc_task:
         bmc_task.cancel()
+    fan_task = app.get("fan_task")
+    if fan_task:
+        fan_task.cancel()
 
 
 def build_app(config: dict) -> web.Application:
@@ -597,6 +781,7 @@ def build_app(config: dict) -> web.Application:
     app.router.add_post("/chaos/bmc_kill", handle_bmc_kill)
     app.router.add_post("/chaos/bmc_revive", handle_bmc_revive)
     app.router.add_get("/bmc/log", handle_bmc_log)
+    app.router.add_get("/display", handle_display)
     app.router.add_get("/discover", handle_discover)
     app.router.add_post("/chats/new", handle_chat_new)
     app.router.add_delete("/chats/{chat_id}", handle_chat_delete)

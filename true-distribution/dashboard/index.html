@@ -73,6 +73,25 @@
   }
   .stat-chip .k { color: var(--text-subtle); text-transform: uppercase; letter-spacing: 1.2px; font-size: 9px; }
   .stat-chip .v { color: var(--text); font-weight: 600; }
+  .fan-chip { gap: 8px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line-strong); }
+  .fan-chip.cold .fan-icon { color: #4a90d9; animation-duration: 4s; }
+  .fan-chip.warm .fan-icon { color: var(--accent); animation-duration: 1.8s; }
+  .fan-chip.hot  .fan-icon { color: var(--arduino); animation-duration: 0.9s; }
+  .fan-chip.peak .fan-icon { color: var(--err); animation-duration: 0.5s; }
+  .fan-icon { display: inline-block; font-size: 13px; animation: fan-spin 2s linear infinite; }
+  .fan-chip.off .fan-icon { animation: none; color: var(--text-subtle); }
+  @keyframes fan-spin { to { transform: rotate(360deg); } }
+  .fan-bar {
+    display: inline-block; width: 36px; height: 4px;
+    background: var(--bg-3); border-radius: 2px; overflow: hidden;
+  }
+  .fan-fill {
+    display: block; height: 100%; width: 0%;
+    background: var(--accent); transition: width .4s, background .4s;
+  }
+  .fan-chip.hot .fan-fill { background: var(--arduino); }
+  .fan-chip.peak .fan-fill { background: var(--err); }
+  .fan-chip.cold .fan-fill { background: #4a90d9; }
   .pill {
     padding: 3px 10px; border-radius: 999px;
     font-family: var(--mono); font-size: 10px;
@@ -248,11 +267,17 @@
     margin-left: 2px; vertical-align: text-bottom;
     animation: caret 1s steps(2) infinite;
   }
+  .answer-box.refined {
+    border-color: rgba(0,255,136,0.35);
+    box-shadow: 0 0 0 1px rgba(0,255,136,0.08) inset;
+  }
   @keyframes caret { 50% { opacity: 0; } }
 
-  /* Markdown styling inside the answer block. */
-  .answer-box p { margin: 0 0 10px 0; }
-  .answer-box p:last-child { margin-bottom: 0; }
+  /* Markdown styling inside both the answer and thinking blocks. */
+  .answer-box p,
+  .think-body p { margin: 0 0 10px 0; }
+  .answer-box p:last-child,
+  .think-body p:last-child { margin-bottom: 0; }
   .answer-box h1, .answer-box h2, .answer-box h3,
   .answer-box h4, .answer-box h5, .answer-box h6 {
     margin: 14px 0 6px 0; font-weight: 700; color: #ffffff;
@@ -263,13 +288,15 @@
   .answer-box h3 { font-size: 15px; }
   .answer-box h4, .answer-box h5, .answer-box h6 { font-size: 14px; color: var(--text-dim); }
   .answer-box h1:first-child, .answer-box h2:first-child, .answer-box h3:first-child { margin-top: 0; }
-  .answer-box strong { font-weight: 700; color: #ffffff; }
-  .answer-box em { font-style: italic; }
-  .answer-box ul, .answer-box ol { margin: 6px 0 10px 0; padding-left: 22px; }
-  .answer-box li { margin: 3px 0; }
+  .answer-box strong, .think-body strong { font-weight: 700; color: #ffffff; }
+  .think-body strong { color: #aaaaaa; }
+  .answer-box em, .think-body em { font-style: italic; }
+  .answer-box ul, .answer-box ol,
+  .think-body ul, .think-body ol { margin: 6px 0 10px 0; padding-left: 22px; }
+  .answer-box li, .think-body li { margin: 3px 0; }
   .answer-box a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .answer-box a:hover { opacity: 0.85; }
-  .answer-box code {
+  .answer-box code, .think-body code {
     font-family: var(--mono);
     font-size: 0.88em;
     padding: 1px 5px;
@@ -277,7 +304,7 @@
     border: 1px solid var(--line);
     border-radius: 4px;
   }
-  .answer-box pre {
+  .answer-box pre, .think-body pre {
     margin: 8px 0;
     padding: 10px 12px;
     background: #060606;
@@ -285,10 +312,45 @@
     border-radius: 6px;
     overflow-x: auto;
   }
-  .answer-box pre code {
+  .answer-box pre code, .think-body pre code {
     background: transparent; border: none; padding: 0;
     font-size: 12.5px; line-height: 1.5;
   }
+
+  /* Thinking block — the raw swarm draft shown as scratch work. Muted so
+     the eye lands on the bright final answer below it. */
+  .think-wrap {
+    margin-bottom: 10px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.015);
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+  }
+  .think-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1.4px;
+    color: var(--text-subtle);
+    margin-bottom: 6px;
+  }
+  .think-body {
+    color: #7a7a7a;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow-y: auto;
+    position: relative;
+  }
+  .think-body.streaming::after {
+    content: ''; display: inline-block; width: 5px; height: 11px;
+    background: #666;
+    margin-left: 2px; vertical-align: text-bottom;
+    animation: caret 1s steps(2) infinite;
+  }
+  .think-body::-webkit-scrollbar { width: 4px; }
+  .think-body::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 2px; }
   .answer-box.aborted {
     border-color: rgba(255,93,93,0.3);
     background: rgba(255,93,93,0.05);
@@ -497,6 +559,12 @@
   <div class="stat-chip"><span class="k">layers</span><span class="v" id="stat-layers">0</span></div>
   <div class="stat-chip"><span class="k">tokens</span><span class="v" id="stat-tokens">0</span></div>
   <div class="stat-chip"><span class="k">tok/s</span><span class="v" id="stat-tps">0.0</span></div>
+  <div class="stat-chip fan-chip" id="fan-chip" title="Cooling policy duty">
+    <span class="fan-icon" id="fan-icon">✦</span>
+    <span class="k">fan</span>
+    <span class="v" id="stat-fan">0%</span>
+    <span class="fan-bar"><span class="fan-fill" id="fan-fill"></span></span>
+  </div>
   <div style="flex:1"></div>
   <div class="bmc-badge" id="bmc-badge"><span class="dot"></span><span id="bmc-src">—</span></div>
   <div class="pill disconnected" id="state-pill">DISCONNECTED</div>
@@ -688,6 +756,23 @@ function renderTopbar() {
   document.getElementById('stat-tokens').textContent = fmtInt(state.total_tokens);
   document.getElementById('stat-tps').textContent = (state.collective_tps || 0).toFixed(1);
 
+  // Fan chip — shows the policy's current duty and reflects thermal state
+  // via color. The spin rate on the icon scales with duty so you can glance
+  // at it and know the cooling regime.
+  const fan = state.fan || { percent: 0, source: 'unknown', desired: 0, duty: 0 };
+  const pct = Math.max(0, Math.min(100, fan.percent || 0));
+  document.getElementById('stat-fan').textContent = pct + '%';
+  document.getElementById('fan-fill').style.width = pct + '%';
+  const chip = document.getElementById('fan-chip');
+  let tier = 'off';
+  if      (pct <= 0)   tier = 'off';
+  else if (pct < 20)   tier = 'cold';
+  else if (pct < 55)   tier = 'warm';
+  else if (pct < 85)   tier = 'hot';
+  else                 tier = 'peak';
+  chip.className = 'stat-chip fan-chip ' + tier;
+  chip.title = `duty ${fan.duty}/255 · source ${fan.source} · desired ${fan.desired}/255`;
+
   const pill = document.getElementById('state-pill');
   const s = state.bmc?.state || 'disconnected';
   pill.textContent = s.toUpperCase();
@@ -842,6 +927,19 @@ function createTurnNode(qid) {
   legend.style.marginTop = '6px';
   legend.style.display = 'none';
 
+  // "Thinking" block — the raw swarm draft, shown dimmed so it reads as
+  // scratch work below the final answer. Hidden until there's content.
+  const thinkWrap = document.createElement('div');
+  thinkWrap.className = 'think-wrap';
+  thinkWrap.style.display = 'none';
+  const thinkLabel = document.createElement('div');
+  thinkLabel.className = 'think-label';
+  thinkLabel.textContent = 'THINKING';
+  const thinkBody = document.createElement('div');
+  thinkBody.className = 'think-body';
+  thinkWrap.appendChild(thinkLabel);
+  thinkWrap.appendChild(thinkBody);
+
   const body = document.createElement('div');
   body.className = 'answer-box';
 
@@ -861,6 +959,7 @@ function createTurnNode(qid) {
   asstWrap.appendChild(header);
   asstWrap.appendChild(stageBar);
   asstWrap.appendChild(legend);
+  asstWrap.appendChild(thinkWrap);
   asstWrap.appendChild(body);
   asstWrap.appendChild(abort);
   asstWrap.appendChild(rawExpand);
@@ -869,7 +968,7 @@ function createTurnNode(qid) {
   root.appendChild(userWrap);
   root.appendChild(asstWrap);
 
-  return { root, userWrap, userBubble, asstWrap, header, stageBar, legend, body, abort, rawExpand, rawPanel };
+  return { root, userWrap, userBubble, asstWrap, header, stageBar, legend, thinkWrap, thinkLabel, thinkBody, body, abort, rawExpand, rawPanel };
 }
 
 function updateTurnNode(n, t) {
@@ -932,17 +1031,45 @@ function updateTurnNode(n, t) {
     n._latKey = latKey;
   }
 
-  // Answer body — the hot path during streaming. Markdown-render only when
-  // content changes; textContent/innerHTML assignment is what makes the
-  // caret jump, so gate it behind a diff.
+  // Phase: "thinking" = swarm draft streaming into thinking block; "refining"
+  // = Bedrock streaming into the bright answer; "done" = both frozen. Falls
+  // back to legacy single-block behavior when the server didn't emit a phase.
+  const phase = a.phase || (streaming ? 'refining' : 'done');
+  const thinking = a.thinking || '';
+
+  // Thinking block — show whenever the swarm produced any draft.
+  if (thinking) {
+    if (n.thinkWrap.style.display === 'none') n.thinkWrap.style.display = '';
+    if (n._think !== thinking) {
+      n.thinkBody.innerHTML = renderMarkdown(thinking);
+      n._think = thinking;
+      // Autoscroll the thinking area while it's live-streaming.
+      if (phase === 'thinking' && streaming) {
+        n.thinkBody.scrollTop = n.thinkBody.scrollHeight;
+      }
+    }
+    const thinkCls = 'think-body' + (phase === 'thinking' && streaming ? ' streaming' : '');
+    if (n.thinkBody.className !== thinkCls) n.thinkBody.className = thinkCls;
+  } else if (n.thinkWrap.style.display !== 'none') {
+    n.thinkWrap.style.display = 'none';
+  }
+
+  // Answer body — bright final answer. Hidden until either Bedrock starts
+  // writing or (when refinement is off) the swarm writes directly into it.
   const content = a.content || '';
+  if (content || phase === 'refining') {
+    if (n.body.style.display === 'none') n.body.style.display = '';
+  } else {
+    n.body.style.display = 'none';
+  }
   if (n._body !== content) {
     n.body.innerHTML = renderMarkdown(content);
     n._body = content;
   }
   const cls = ['answer-box'];
-  if (streaming) cls.push('streaming');
+  if (streaming && phase !== 'thinking') cls.push('streaming');
   if (aborted) cls.push('aborted');
+  if (a.refined) cls.push('refined');
   const clsStr = cls.join(' ');
   if (n.body.className !== clsStr) n.body.className = clsStr;
 

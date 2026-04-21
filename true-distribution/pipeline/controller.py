@@ -37,6 +37,11 @@ class ClusterView:
     partition: list[tuple[str, int, int]] = field(default_factory=list)
     dead_workers: set[str] = field(default_factory=set)
     version: int = 0  # bumps every BMC update so coordinator can detect changes
+    # Fan state reported back by firmware via `STATUS FAN <duty> src=<auto|host>`.
+    # duty is 0-255 (8-bit PWM); source indicates whether the current value
+    # came from the host policy or the firmware's autonomous fallback.
+    fan_duty: int = 0
+    fan_source: str = "unknown"
 
 
 class BMCLink:
@@ -274,6 +279,13 @@ class ClusterController:
         BMC's serial port find the cluster."""
         await self._send(f"COORDINATOR {url}")
 
+    async def set_fan_duty(self, duty: int):
+        """Push a fan duty cycle (0-255) to the BMC. The firmware writes it
+        to the PWM pin driving the fan MOSFET. If the host stops sending,
+        the BMC falls back to an autonomous policy based on cluster state."""
+        duty = max(0, min(255, int(duty)))
+        await self._send(f"FAN {duty}")
+
     # ─── internals ─────────────────────────────────────────────────────
 
     async def _send(self, line: str):
@@ -319,6 +331,17 @@ class ClusterController:
             log.info(f"BMC: {rest}")
         elif cmd == "ACK":
             pass  # quiet
+        elif cmd == "STATUS":
+            # e.g. "STATUS FAN 128 src=host"
+            toks = rest.split()
+            if len(toks) >= 2 and toks[0] == "FAN":
+                try:
+                    self.view.fan_duty = int(toks[1])
+                except ValueError:
+                    pass
+                src = next((t.split("=", 1)[1] for t in toks[2:]
+                            if t.startswith("src=")), "unknown")
+                self.view.fan_source = src
         elif cmd:
             log.debug(f"unhandled BMC event: {line}")
 

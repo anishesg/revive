@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.16)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+set(EXTRA_COMPONENT_DIRS components)
+add_compile_options(-fdiagnostics-color=always -w)
+project(revive_display)
