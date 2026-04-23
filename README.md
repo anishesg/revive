@@ -1,5 +1,7 @@
 # R E V I V E
 
+Update: 1st place award at HackPrinceton 2026 for the Hardware x AI track!
+
 **Distributed LLM inference across consumer devices. Phones, tablets, Raspberry Pis, and laptops form a swarm that thinks together.**
 
 REVIVE turns everyday devices into a collective AI system. No cloud. No GPUs. Just the devices in the room.
@@ -15,7 +17,7 @@ One Qwen3 model with its transformer layers *physically split* across multiple d
 **Build pipeline** &nbsp;(`LLM/`)
 Offline pipeline that takes Qwen3 bases and produces role-specialized, device-tiered GGUFs: expanded data generation (Haiku + local Qwen3-4B distillation), QLoRA fine-tuning, ShortGPT layer pruning, imatrix-calibrated K-quant export at Q2_K / Q3_K_S / Q4_K_M / Q5_K_M. Emits a full role × device-tier matrix with a SHA-256 `manifest.json`. Currently feeds Strategy 1; Strategy 2 consumes fp16 weights directly from HuggingFace.
 
-Built at HackPrinceton 2025.
+Built at HackPrinceton Spring 2026.
 
 ---
 
